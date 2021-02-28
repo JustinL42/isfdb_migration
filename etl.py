@@ -16,7 +16,7 @@ if not (zipDownloaded or filesUnzipped):
 	# the download command is commented out to prevent unintentional 
 	# traffic to the site. 
 	# Uncomment the following line if actually fetching the data.
-	#request.urlretrieve(dataURL, "BX-CSV-Dump.zip")
+	# request.urlretrieve(dataURL, "BX-CSV-Dump.zip")
 
 if not filesUnzipped:
 	import zipfile
@@ -53,7 +53,7 @@ cur = conn.cursor()
 # the drop database command is commented out to prevent accidentally
 # deleting irrecoverable data. It isn't needed during the initial ETL
 # but can be uncommented if the ETL needs to be modified and re-run.
-#cur.execute("DROP DATABASE IF EXISTS rec_system;")
+# cur.execute("DROP DATABASE IF EXISTS rec_system;")
 
 try:
 	cur.execute("CREATE DATABASE rec_system;")
