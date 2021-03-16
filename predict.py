@@ -14,6 +14,7 @@ dbConnection.close();
 
 reader = Reader(rating_scale=(1, 10))
 data = Dataset.load_from_df(ratings_df, reader)
+train_set = data.build_full_trainset()
 
 print("""
     Number of ratings: %d\n
@@ -22,22 +23,32 @@ print("""
         len(ratings_df['isbn'].unique()), 
         len(ratings_df['id'].unique())))
 
-algo = SVD(n_factors=80, n_epochs=20, lr_all=0.005, reg_all=0.2)
-# algo = KNNBasic()
-# algo = NMF()
+algo = SVD(biased=False, random_state=777, verbose=True)
+# algo = KNNBasic(verbose=True)
 print("algo: {}".format(algo))
-print("Cross validating...")
-cross_validate(algo, data, measures=['RMSE', 'MAE'], cv=3, verbose=True)
+print("Fitting train_set")
+algo.fit(train_set)
+
 
 print("Getting test predictions")
-selected_user = str(500016)
+# selected_user = 171118
+selected_user = 500016
 predictions = [(isbn, algo.predict(selected_user, isbn).est) \
                 for isbn in ratings_df['isbn'].unique()]
 predictions_df = pd.DataFrame(predictions, 
     columns=['isbn', 'rating']).sort_values(by="rating", 
     ascending=False).merge(books_df, on='isbn', how='left')    
 
-for i, row, in predictions_df.head(10).iterrows():
+for i, row, in predictions_df.head(40).iterrows():
+    print("{}: {}".format(i + 1, row.title), end="")
+    if ~isnan(row.year):
+        print(" ({})".format(int(row.year)), end="")
+    print("\nby {}".format(row.author))
+    print(row.isbn)
+    print("{}\n".format(row.rating))
+
+
+for i, row, in predictions_df.tail(20).iterrows():
     print("{}: {}".format(i + 1, row.title), end="")
     if ~isnan(row.year):
         print(" ({})".format(int(row.year)), end="")
