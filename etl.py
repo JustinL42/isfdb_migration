@@ -1,6 +1,9 @@
 #!/usr/bin/python3
 import psycopg2
 
+
+import mysql.connector
+
 #download and unzip the Book-Crossing Dataset, if not done already
 import os
 zipDownloaded = os.path.isfile("BX-CSV-Dump.zip")
@@ -53,7 +56,7 @@ cur = conn.cursor()
 # the drop database command is commented out to prevent accidentally
 # deleting irrecoverable data. It isn't needed during the initial ETL
 # but can be uncommented if the ETL needs to be modified and re-run.
-# cur.execute("DROP DATABASE IF EXISTS rec_system;")
+cur.execute("DROP DATABASE IF EXISTS rec_system;")
 
 try:
 	cur.execute("CREATE DATABASE rec_system;")
@@ -125,14 +128,58 @@ cur.copy_expert(r"""
 	CSV HEADER 
 	ENCODING 'UTF-8';""",
 	open("utf-users.csv"))
-cur.copy_expert(r"""
-	COPY ratings 
-	FROM STDIN
-	DELIMITER ';'
-	NULL ''
-	CSV HEADER 
-	ENCODING 'UTF-8';""",
-	open("utf-ratings.csv"))
+
+
+print("Fetching allowed ISBNs...")
+mysql_conn = mysql.connector.connect(
+    host="localhost",
+    user="root",
+    password="",
+    database="isfdb"
+)
+
+mysql_cur = mysql_conn.cursor()
+
+mysql_cur.execute("""
+select distinct pub_isbn
+from pubs
+where pub_id in (
+    select pub_id 
+    from pub_content
+    where title_id in (
+        select title_id
+        from titles
+        where title_non_genre = 'No'
+        and title_graphic = 'No'
+    ) 
+) 
+and pub_isbn is not NULL
+and pub_isbn != ''
+and LENGTH(pub_isbn) <= 13;
+""")
+
+results =  cur.fetchall()
+isbnSet = set([str(x[0]) for x in results])
+mysql_cur.close()
+mysql_conn.close()
+
+ex = why
+
+
+original_ratings = pd.read_csv("utf-ratings.csv", sep=";")
+original_ratings[(original_ratings.ISBN.isin(es)) & \
+					(original_ratings['Book-Rating'] > 0)]
+
+# cur.copy_expert(r"""
+# 	COPY ratings 
+# 	FROM STDIN
+# 	DELIMITER ';'
+# 	NULL ''
+# 	CSV HEADER 
+# 	ENCODING 'UTF-8';""",
+# 	open("utf-ratings.csv"))
+
+
 
 cur.close()
 conn.close()
