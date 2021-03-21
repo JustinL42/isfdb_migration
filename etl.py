@@ -1,7 +1,8 @@
 #!/usr/bin/python3
-import psycopg2
-import mysql.connector
 import pandas as pd
+import psycopg2
+from psycopg2.extras import execute_values
+import mysql.connector
 
 #download and unzip the Book-Crossing Dataset, if not done already
 import os
@@ -45,6 +46,40 @@ os.system("""
 os.system("""
 	iconv -f ISO_8859-16 -t utf-8 BX-Book-Ratings.csv |
 	tr -d '\\\"' > utf-ratings.csv""")
+
+
+print("Getting set of speculative fiction ISBNs from ISFDB...")
+mysql_conn = mysql.connector.connect(
+	host="localhost",
+	user="root",
+	password="",
+	database="isfdb"
+)
+
+mysql_cur = mysql_conn.cursor()
+
+# Get all the pulication ISBNs associated with titles 
+# that aren't graphic or non-genre
+mysql_cur.execute("""
+SELECT DISTINCT pub_isbn
+FROM pubs
+WHERE pub_id in (
+	SELECT pub_id 
+	FROM pub_content
+	WHERE title_id in (
+		SELECT title_id
+		FROM titles
+		WHERE title_non_genre = 'No'
+		AND title_graphic = 'No'
+	) 
+) 
+AND pub_isbn is not NULL
+AND pub_isbn != ''
+AND LENGTH(pub_isbn) <= 13;""")
+
+isbnSet = set([str(x[0]) for x in mysql_cur.fetchall()])
+mysql_cur.close()
+mysql_conn.close()
 
 
 #create database
@@ -127,99 +162,28 @@ cur.copy_expert(r"""
 	CSV HEADER 
 	ENCODING 'UTF-8';""",
 	open("utf-users.csv"))
+conn.commit()
 
-
-print("Fetching allowed ISBNs...")
-mysql_conn = mysql.connector.connect(
-    host="localhost",
-    user="root",
-    password="",
-    database="isfdb"
-)
-
-mysql_cur = mysql_conn.cursor()
-
-mysql_cur.execute("""
-select distinct pub_isbn
-from pubs
-where pub_id in (
-    select pub_id 
-    from pub_content
-    where title_id in (
-        select title_id
-        from titles
-        where title_non_genre = 'No'
-        and title_graphic = 'No'
-    ) 
-) 
-and pub_isbn is not NULL
-and pub_isbn != ''
-and LENGTH(pub_isbn) <= 13;
-""")
-
-results =  mysql_cur.fetchall()
-isbnSet = set([str(x[0]) for x in results])
-mysql_cur.close()
-mysql_conn.close()
-
+print("filtering and formatting ratings...")
 original_ratings = pd.read_csv("utf-ratings.csv", sep=";")
+
+# remove ratings where:
+#  * the isbn isn't in the set of speculative fiction books
+#  * the rating is zero (representing an implicit rating)
 filtered_ratings = original_ratings[(original_ratings.ISBN.isin(isbnSet)) & \
-					(original_ratings['Book-Rating'] > 0)]
+				(original_ratings['Book-Rating'] > 0)]
 
-ratings_tuples = [tuple(x) for x in filtered_ratings.to_numpy()]
-cur.executemany("""
-	insert 
-	into ratings 
-	values('User-ID', 'ISBN', 'Book-Rating')""", 
-	filtered_ratings)
-
-
-# cur.copy_expert(r"""
-# 	COPY ratings 
-# 	FROM STDIN
-# 	DELIMITER ';'
-# 	NULL ''
-# 	CSV HEADER 
-# 	ENCODING 'UTF-8';""",
-# 	open("utf-ratings.csv"))
-
-
-
-cur.close()
-conn.close()
-
-print("filtering and formatting ratings table...")
-# filter out non-helpful data
-# conn = psycopg2.connect("dbname=rec_system user=postgres")
-# cur = conn.cursor()
-
-# cur.execute("""
-# 	DELETE
-# 	FROM ratings
-# 	WHERE id not in (
-# 		SELECT DISTINCT id 
-# 		FROM ratings 
-# 		WHERE original_rating > 0 
-# 		AND original_rating < 10);""")
-
-# cur.execute("""
-# 	DELETE
-# 	FROM ratings
-# 	WHERE original_rating = 0;""")
-
-# cur.execute("""
-# 	DELETE
-# 	FROM ratings
-# 	WHERE id in (
-# 		SELECT id
-# 		FROM (
-# 			SELECT id, count(*) review_count
-# 			FROM ratings
-# 			GROUP BY id) AS subquery
-# 		where review_count < 3);""")
-
-# conn.commit()
-# cur.close()
+execute_values(
+	cur=cur,
+	sql="""
+		insert into ratings
+		(id, original_ISBN, original_rating)
+		VALUES %s;
+		""",
+	argslist=filtered_ratings.to_dict(orient="records"),
+	template="""(%(User-ID)s, %(ISBN)s, %(Book-Rating)s)"""
+)
+conn.commit()
 
 # add columns for normalized values and 
 # copy the originals as a starting point
@@ -307,6 +271,16 @@ for record in cur.fetchall():
 	conn.commit()
 	cur2.close()
 
+# remove ratings from users who have only one rating in the table
+cur.execute("""
+	DELETE 
+	FROM ratings 
+	WHERE id in (
+		SELECT id 
+		FROM ratings
+		GROUP BY id
+		HAVING COUNT(*) = 1
+	);""")
 conn.commit()
 cur.close()
 
