@@ -1,8 +1,7 @@
 #!/usr/bin/python3
 import psycopg2
-
-
 import mysql.connector
+import pandas as pd
 
 #download and unzip the Book-Crossing Dataset, if not done already
 import os
@@ -158,17 +157,22 @@ and pub_isbn != ''
 and LENGTH(pub_isbn) <= 13;
 """)
 
-results =  cur.fetchall()
+results =  mysql_cur.fetchall()
 isbnSet = set([str(x[0]) for x in results])
 mysql_cur.close()
 mysql_conn.close()
 
-ex = why
-
-
 original_ratings = pd.read_csv("utf-ratings.csv", sep=";")
-original_ratings[(original_ratings.ISBN.isin(es)) & \
+filtered_ratings = original_ratings[(original_ratings.ISBN.isin(isbnSet)) & \
 					(original_ratings['Book-Rating'] > 0)]
+
+ratings_tuples = [tuple(x) for x in filtered_ratings.to_numpy()]
+cur.executemany("""
+	insert 
+	into ratings 
+	values('User-ID', 'ISBN', 'Book-Rating')""", 
+	filtered_ratings)
+
 
 # cur.copy_expert(r"""
 # 	COPY ratings 
@@ -186,36 +190,36 @@ conn.close()
 
 print("filtering and formatting ratings table...")
 # filter out non-helpful data
-conn = psycopg2.connect("dbname=rec_system user=postgres")
-cur = conn.cursor()
+# conn = psycopg2.connect("dbname=rec_system user=postgres")
+# cur = conn.cursor()
 
-cur.execute("""
-	DELETE
-	FROM ratings
-	WHERE id not in (
-		SELECT DISTINCT id 
-		FROM ratings 
-		WHERE original_rating > 0 
-		AND original_rating < 10);""")
+# cur.execute("""
+# 	DELETE
+# 	FROM ratings
+# 	WHERE id not in (
+# 		SELECT DISTINCT id 
+# 		FROM ratings 
+# 		WHERE original_rating > 0 
+# 		AND original_rating < 10);""")
 
-cur.execute("""
-	DELETE
-	FROM ratings
-	WHERE original_rating = 0;""")
+# cur.execute("""
+# 	DELETE
+# 	FROM ratings
+# 	WHERE original_rating = 0;""")
 
-cur.execute("""
-	DELETE
-	FROM ratings
-	WHERE id in (
-		SELECT id
-		FROM (
-			SELECT id, count(*) review_count
-			FROM ratings
-			GROUP BY id) AS subquery
-		where review_count < 3);""")
+# cur.execute("""
+# 	DELETE
+# 	FROM ratings
+# 	WHERE id in (
+# 		SELECT id
+# 		FROM (
+# 			SELECT id, count(*) review_count
+# 			FROM ratings
+# 			GROUP BY id) AS subquery
+# 		where review_count < 3);""")
 
-conn.commit()
-cur.close()
+# conn.commit()
+# cur.close()
 
 # add columns for normalized values and 
 # copy the originals as a starting point
