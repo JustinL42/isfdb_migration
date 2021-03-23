@@ -29,8 +29,11 @@ print("""
         len(ratings_df['isbn'].unique()), 
         len(ratings_df['id'].unique())))
 
-# algo = SVD(biased=True, random_state=777, verbose=True)
-algo = KNNBasic(verbose=True)
+params = {'lr_all': 0.012, 'n_epochs': 30, 'reg_all': 0.2}
+
+algo = SVD(lr_all=0.012, n_epochs=30, reg_all=0.2, 
+    random_state=777, verbose=True)
+# algo = KNNBasic(verbose=True)
 print("algo: {}".format(algo))
 print("Fitting train_set")
 algo.fit(train_set)

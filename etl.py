@@ -3,6 +3,9 @@ import pandas as pd
 import psycopg2
 from psycopg2.extras import execute_values
 import mysql.connector
+import pickle
+
+db_conn_string = "dbname=rec_system user=postgres"
 
 #download and unzip the Book-Crossing Dataset, if not done already
 import os
@@ -47,39 +50,44 @@ os.system("""
 	iconv -f ISO_8859-16 -t utf-8 BX-Book-Ratings.csv |
 	tr -d '\\\"' > utf-ratings.csv""")
 
-
 print("Getting set of speculative fiction ISBNs from ISFDB...")
-mysql_conn = mysql.connector.connect(
-	host="localhost",
-	user="root",
-	password="",
-	database="isfdb"
-)
+# Use the pickled copy if it exists. Otherwise, get it 
+# from the db, turn it into a Set and pickle it for next time
+try:
+	isbnSet = pickle.load(open("isbnSet.pickle", "rb"))
+except FileNotFoundError: 
+	mysql_conn = mysql.connector.connect(
+		host="localhost",
+		user="root",
+		password="",
+		database="isfdb"
+	)
 
-mysql_cur = mysql_conn.cursor()
+	mysql_cur = mysql_conn.cursor()
 
-# Get all the pulication ISBNs associated with titles 
-# that aren't graphic or non-genre
-mysql_cur.execute("""
-SELECT DISTINCT pub_isbn
-FROM pubs
-WHERE pub_id in (
-	SELECT pub_id 
-	FROM pub_content
-	WHERE title_id in (
-		SELECT title_id
-		FROM titles
-		WHERE title_non_genre = 'No'
-		AND title_graphic = 'No'
+	# Get all the pulication ISBNs associated with titles 
+	# that aren't graphic or non-genre
+	mysql_cur.execute("""
+	SELECT DISTINCT pub_isbn
+	FROM pubs
+	WHERE pub_id in (
+		SELECT pub_id 
+		FROM pub_content
+		WHERE title_id in (
+			SELECT title_id
+			FROM titles
+			WHERE title_non_genre = 'No'
+			AND title_graphic = 'No'
+		) 
 	) 
-) 
-AND pub_isbn is not NULL
-AND pub_isbn != ''
-AND LENGTH(pub_isbn) <= 13;""")
+	AND pub_isbn is not NULL
+	AND pub_isbn != ''
+	AND LENGTH(pub_isbn) <= 13;""")
 
-isbnSet = set([str(x[0]) for x in mysql_cur.fetchall()])
-mysql_cur.close()
-mysql_conn.close()
+	isbnSet = set([str(x[0]) for x in mysql_cur.fetchall()])
+	pickle.dump(isbnSet, open("isbnSet.pickle", "wb"))
+	mysql_cur.close()
+	mysql_conn.close()
 
 
 #create database
@@ -90,7 +98,7 @@ cur = conn.cursor()
 # the drop database command is commented out to prevent accidentally
 # deleting irrecoverable data. It isn't needed during the initial ETL
 # but can be uncommented if the ETL needs to be modified and re-run.
-cur.execute("DROP DATABASE IF EXISTS rec_system;")
+# cur.execute("DROP DATABASE IF EXISTS rec_system;")
 
 try:
 	cur.execute("CREATE DATABASE rec_system;")
@@ -110,7 +118,7 @@ cur.close()
 conn.close()
 
 print("creating tables...")
-conn = psycopg2.connect("dbname=rec_system user=postgres")
+conn = psycopg2.connect(db_conn_string)
 cur = conn.cursor()
 
 cur.execute("""
@@ -141,7 +149,7 @@ cur.close()
 conn.close()
 
 print("copying csv data into databases...")
-conn = psycopg2.connect("dbname=rec_system user=postgres")
+conn = psycopg2.connect(db_conn_string)
 conn.autocommit = True
 cur = conn.cursor()
 
@@ -176,7 +184,7 @@ filtered_ratings = original_ratings[(original_ratings.ISBN.isin(isbnSet)) & \
 execute_values(
 	cur=cur,
 	sql="""
-		insert into ratings
+		INSERT INTO ratings
 		(id, original_ISBN, original_rating)
 		VALUES %s;
 		""",
@@ -282,11 +290,8 @@ cur.execute("""
 		HAVING COUNT(*) = 1
 	);""")
 conn.commit()
-cur.close()
 
 # create norm_isbn_index
-cur = conn.cursor()
-
 cur.execute("""
 	ALTER TABLE ratings
 	ALTER COLUMN original_isbn
@@ -316,7 +321,7 @@ cur.close()
 conn.close()
 
 # add book club users and and reviews
-conn = psycopg2.connect("dbname=rec_system user=postgres")
+conn = psycopg2.connect(db_conn_string)
 conn.autocommit = True
 cur = conn.cursor()
 
