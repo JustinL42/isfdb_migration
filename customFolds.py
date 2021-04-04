@@ -1,10 +1,3 @@
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
-from itertools import chain
-from collections import namedtuple, defaultdict
-import numpy as np
-# from ..utils import get_rng
-from surprise.utils import get_rng
 from surprise.model_selection import KFold
 
 class JumpStartKFolds(KFold):

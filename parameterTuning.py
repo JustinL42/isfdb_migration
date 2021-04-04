@@ -60,7 +60,12 @@ param_grid = {
 #               'reg_all': [ 0.20], 'biased': [True, False]}
 algo = SVD
 # algo = KNNBasic
-gs = GridSearchCV(algo, param_grid, measures=['rmse', 'mae'], cv=3, n_jobs = -2)
+gs = GridSearchCV(algo, param_grid, measures=['rmse', 'mae'], 
+					# cv=3, n_jobs = -2)
+					cv=BalancedKFold(
+						n_splits=3, random_state=3, shuffle=True), 
+					n_jobs = -2)
+
 gs.fit(data)
 
 best_rmse = gs.best_score['rmse']
