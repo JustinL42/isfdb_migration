@@ -105,7 +105,7 @@ cur.execute("""
 	CREATE TABLE ratings 
 	(id int NOT NULL, 
 	original_ISBN varchar(13) NOT NULL, 
-	original_rating int NOT NULL);""")
+	original_rating real NOT NULL);""")
 cur.execute("CREATE INDEX user_index ON ratings (id);")
 conn.commit()
 cur.close()
@@ -196,7 +196,13 @@ deduplicateList = [
 	duplicate("shadow of the torturer", '0671540661', ['0671828258', 
 		'0671463985', '0671253255']),
 	duplicate("stars my destination", '0425043657', ['0871358816', 
-		'0679767800'])]
+		'0679767800']),
+	duplicate("Hyperion", '0425043657', ['0871358816', 
+		'0679767800']),
+	duplicate("blue sword", '0425075052', ['0425101428', 
+		'0425088405', '0688009387', '0441068804', '014130975X', 
+		'0425063186','0141311886', ])
+	]
 
 cur = conn.cursor()
 print("\nremoving duplicates...")
@@ -283,7 +289,7 @@ conn.commit()
 cur.close()
 conn.close()
 
-# add book club users and and reviews
+print("add book club users and and reviews")
 conn = psycopg2.connect(db_conn_string)
 conn.autocommit = True
 cur = conn.cursor()
@@ -304,7 +310,7 @@ cur.copy_expert(r"""
 	NULL ''
 	CSV HEADER 
 	ENCODING 'UTF-8';""",
-	open("book_club_ratings.csv"))
+	open("book_club_ratings2.csv"))
 
 cur.close()
 conn.close()
