@@ -62,7 +62,7 @@ cur = conn.cursor()
 # the drop database command is commented out to prevent accidentally
 # deleting irrecoverable data. It isn't needed during the initial ETL
 # but can be uncommented if the ETL needs to be modified and re-run.
-# cur.execute("DROP DATABASE IF EXISTS rec_system;")
+cur.execute("DROP DATABASE IF EXISTS rec_system;")
 
 try:
 	cur.execute("CREATE DATABASE rec_system;")
@@ -311,15 +311,31 @@ cur.copy_expert(r"""
 	NULL ''
 	CSV HEADER 
 	ENCODING 'UTF-8';""",
-	open("book_club_ratings2.csv"))
+	open("book_club_ratings.csv"))
 
 
-df = pd.read_csv("book_club_ratings2.csv")
-means_df = pd.DataFrame(df.groupby("ISBN")['rating'].mean())
-means_df['id'] = '500000'
-means_df['original_isbn'] = nan
-means_df['original_rating'] = nan
-book_club_user_df = 
+book_club_df =  pd.read_csv("book_club_ratings.csv", 
+	dtype={'id' : int, 'original_isbn' : str, 'original_rating' : float, 
+	'ISBN' : str, 'rating' : float})
+book_club_user_df = pd.DataFrame(book_club_df.groupby(by="ISBN", 
+	as_index=False)['rating'].mean())
+# means_df['id'] = '500000'
+# means_df['original_isbn'] = nan
+# means_df['original_rating'] = nan
+# book_club_user_df =  means_df[['id', 'original_rating', 
+	# 'original_isbn', 'ISBN', 'rating']]
+
+execute_values(
+	cur=cur,
+	sql="""
+		INSERT INTO ratings
+		(id, original_ISBN, original_rating, ISBN, rating)
+		VALUES %s;
+		""",
+	argslist=book_club_user_df.to_dict(orient="records"),
+	template="""(500000, NULL, NULL, %(ISBN)s, %(rating)s)"""
+)
+conn.commit()
 
 
 
