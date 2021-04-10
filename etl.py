@@ -3,6 +3,7 @@ import pandas as pd
 import psycopg2
 from psycopg2.extras import execute_values
 import util
+from math import nan
 
 db_conn_string = "dbname=rec_system user=postgres"
 
@@ -311,6 +312,16 @@ cur.copy_expert(r"""
 	CSV HEADER 
 	ENCODING 'UTF-8';""",
 	open("book_club_ratings2.csv"))
+
+
+df = pd.read_csv("book_club_ratings2.csv")
+means_df = pd.DataFrame(df.groupby("ISBN")['rating'].mean())
+means_df['id'] = '500000'
+means_df['original_isbn'] = nan
+means_df['original_rating'] = nan
+book_club_user_df = 
+
+
 
 cur.close()
 conn.close()
