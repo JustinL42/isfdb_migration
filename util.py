@@ -29,6 +29,11 @@ def get_isbn_set():
 				FROM titles
 				WHERE title_non_genre = 'No'
 				AND title_graphic = 'No'
+				AND title_id NOT IN (
+					SELECT title_id 
+					FROM  canonical_author 
+					WHERE author_id in (4853, 2857, 319407)
+				)
 			) 
 		) 
 		AND pub_isbn is not NULL
