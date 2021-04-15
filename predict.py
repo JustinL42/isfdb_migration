@@ -1,6 +1,7 @@
+#!/usr/bin/python3
 import pandas as pd
 from sqlalchemy import create_engine
-from surprise import Dataset, Reader, SVD, KNNBasic, accuracy
+from surprise import Dataset, Reader, SVD, KNNBasic, dump
 from numpy import isnan
 
 print("Connecting to db and loading data into memory...")
@@ -29,22 +30,7 @@ print("""
         len(ratings_df['isbn'].unique()), 
         len(ratings_df['id'].unique())))
 
-param_grid = {
-    'random_state': 777,
-    'biased': True, 
-    'n_factors': 20,
-    'n_epochs': 30, 
-    'lr_bu': 0.012,
-    'lr_bi': 0.005,
-    'lr_pu': 0.005,
-    'lr_qi': 0.005,  
-    'reg_bu': 0.1,
-    'reg_bi': 0.3,
-    'reg_pu': 0.3,
-    'reg_qi': 0.3
-    }
-
-algo = SVD(**param_grid)
+_, algo = dump.load("bestAlgo.pickle")
 # algo = KNNBasic(verbose=True)
 print("algo: {}".format(algo.__class__.__name__))
 print("Fitting train_set")
@@ -52,10 +38,10 @@ algo.fit(train_set)
 
 
 print("Getting test predictions")
-# selected_user = 500016
+selected_user = 500016
 # selected_user = 500000
-selected_user = 600000
-predictions = [(isbn, algo.predict(selected_user, isbn).est) \
+# selected_user = 600001
+predictions = [(isbn, algo.predict(selected_user, isbn, clip=False).est) \
                 for isbn in ratings_df['isbn'].unique()]
 predictions_df = pd.DataFrame(predictions, 
     columns=['isbn', 'rating']).sort_values(by="rating", 
