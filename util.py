@@ -17,7 +17,7 @@ def get_isbn_set():
 		mysql_cur = mysql_conn.cursor()
 
 		# Get all the pulication ISBNs associated with titles 
-		# that aren't graphic or non-genre
+		# that aren't graphic, juvenile, or non-genre
 		mysql_cur.execute("""
 		SELECT DISTINCT pub_isbn
 		FROM pubs
@@ -29,6 +29,7 @@ def get_isbn_set():
 				FROM titles
 				WHERE title_non_genre = 'No'
 				AND title_graphic = 'No'
+				AND title_jvn = 'No'
 				AND title_id NOT IN (
 					SELECT title_id 
 					FROM  canonical_author 
