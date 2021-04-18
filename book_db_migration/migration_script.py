@@ -2,7 +2,10 @@
 
 import mysql.connector
 from mysql.connector import (connection)
-import psycopg2
+from sqlalchemy import create_engine
+# import psycopg2
+import pandas as pd
+import pymysql
 
 conn = mysql.connector.connect(
     host="localhost",
@@ -38,6 +41,10 @@ cur.execute("""
 
 
 titles = cur.fetchall()
+
+alchemyEngine = create_engine('mysql+pymysql://root:@127.0.0.1/isfdb')
+alch_conn = alchemyEngine.connect()
+alch_cur = alch_conn.cursor()
 
 i = 0
 for title_id, title, synopsis_id, note_id, series_id, seriesnum, \
@@ -85,6 +92,64 @@ for title_id, title, synopsis_id, note_id, series_id, seriesnum, \
         # insert the translations into the translation table
         # translation_title_id, translation_title, newest_title_id, year
 
+        root_id = parent_id
+    else:
+        root_id = title_id
+
+    ###############################
+    # Publictions-based information
+    ##############################
+    # Useful test cases
+    # 1608: fellowship of ring
+    # 
+    # 2157884: Mira's last dance
+    # 1475: Nueromancer
+    # 41897: call of cthulhlu
+
+    all_pubs = pd.read_sql("""
+        SELECT t.title_id, t.title_language, p.pub_id, p.pub_title, YEAR(p.pub_year) as p_year, 
+            p.pub_pages, p.pub_ptype, p.pub_ctype, p.pub_isbn
+        FROM pubs as p
+        JOIN pub_content as c
+        ON c.pub_id = p.pub_id
+            JOIN titles as t
+            ON t.title_id = c.title_id
+            WHERE t.title_id = %s
+            OR t.title_parent = %s;""", 
+        alch_conn, params=[root_id, root_id])
+
+    if ttype == "SHORTFICTION":
+        ttype = "NOVELLA"
+
+    # editions
+    if ttype == "NOVEL" or ttype == "NOVELLA":
+        en_books = all_pubs[( (all_pubs.title_language == 17) &
+                        ((all_pubs.pub_ctype == "NOVEL") | 
+                        (all_pubs.pub_ctype == "CHAPBOOK") |
+                        (all_pubs.pub_ctype == "ANTHOLOGY") |
+                        (all_pubs.pub_ctype == "COLLECTION") |
+                        (all_pubs.pub_ctype == "OMNIBUS")) )]
+    else:
+        # ttype is ANTHOLOGY, COLLECTION or OMNIBUS and must match 
+        # the publication type exactly
+        en_books = all_pubs[( (all_pubs.title_language == 17) &
+                            (all_pubs.pub_ctype == ttype) )]
+
+    editions = en_books.shape[0]
+
+    # If the title was never published in book form, it probably isn't a
+    # good book club recommendation, since it is probably hard to find 
+    # and not very good
+    if editions == 0:
+        continue
+
+    # For pages and pictures, further filter Novels and Novellas
+    if ttype == "NOVEL" or ttype == "NOVELLA":
+        en_books = en_books[(en_books.pub_ctype == "NOVEL") | 
+                        (en_books.pub_ctype == "CHAPBOOK")]
+
+
+
 
     cur.execute("""
         SELECT author_canonical
@@ -93,8 +158,7 @@ for title_id, title, synopsis_id, note_id, series_id, seriesnum, \
             SELECT author_id
             FROM canonical_author
             WHERE title_id = %s
-        );
-        """, (title_id,))
+        );""", (title_id,))
     authors_results = cur.fetchall()
     if authors_results:
         authors = [a for result in authors_results for a in result]
@@ -156,8 +220,7 @@ for title_id, title, synopsis_id, note_id, series_id, seriesnum, \
     if year == 0:
         year = None
 
-    if ttype == "SHORTFICTION":
-        ttype = "NOVELLA"
+
 
     #TODO: cleanup html tags in synopsis
     if synopsis_id:
@@ -176,17 +239,11 @@ for title_id, title, synopsis_id, note_id, series_id, seriesnum, \
             """, (note_id,))
         note = cur.fetchone()[0]
 
-    ################
-    # Useful test cases
-    # 1608: fellowship of ring
-    # 2157884: Mira's last dance
-    # 1475: Nueromancer
-    # 41897: call of cthulhlu
-
     # page count
     if ttype in ('NOVEL', 'NOVELLA'):
         allowed_ctypes = "('NOVEL', 'CHAPBOOK') "
     else:
+        # ttype is ANTHOLOGY, COLLECTION or OMNIBUS
         allowed_ctypes = "('" + ttype + "') "
 
     # Try to get page count of a recent edition. Favor hardcovers, 
