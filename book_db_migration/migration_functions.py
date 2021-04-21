@@ -5,6 +5,10 @@ import psycopg2
 import pandas as pd
 import pymysql
 
+import logging
+logger = logging.getLogger(__name__)
+
+
 db_conn_string = "dbname=rec_system user=postgres"
 
 conn = mysql.connector.connect(
@@ -65,13 +69,14 @@ def prepare_books_tables(psg_cur):
             original_title      text default NULL,
             original_year       text default NULL,
             isfdb_rating        real default NULL, 
-            won_award          boolean default FALSE,
+            award_winner           boolean default FALSE,
             juvenile            boolean default FALSE,
+            stand_alone         boolean default FALSE,
             cover_image         text default NULL CHECK (cover_image <> ''),
             wikipedia           text default NULL CHECK (wikipedia <> ''),
             synopsis            text default NULL,
             note                text default NULL,
-            UNIQUE(isbn),
+            -- UNIQUE(isbn),
             PRIMARY KEY (title_id)
         );
 
@@ -90,7 +95,7 @@ def prepare_books_tables(psg_cur):
             PRIMARY KEY (title_id)
         );
 
-        CREATE TABLE book_contents (
+        CREATE TABLE contents (
             id                  serial PRIMARY KEY,
             book_title_id       integer NOT NULL,
             content_title_id    integer NOT NULL
@@ -115,11 +120,11 @@ def constrain_and_index_book_tables(psg_cur):
         ADD FOREIGN KEY (newest_title_id) 
         REFERENCES books(title_id);
 
-        ALTER TABLE book_contents 
+        ALTER TABLE contents 
         ADD FOREIGN KEY (book_title_id) 
         REFERENCES books(title_id);
 
-        ALTER TABLE book_contents 
+        ALTER TABLE contents 
         ADD FOREIGN KEY (content_title_id) 
         REFERENCES books(title_id);
 
@@ -128,14 +133,13 @@ def constrain_and_index_book_tables(psg_cur):
         CREATE INDEX ON books(isbn);
         CREATE INDEX ON books(original_lang);
         CREATE INDEX ON books(isfdb_rating);
-        CREATE INDEX ON books(won_award);
+        CREATE INDEX ON books(award_winner);
         CREATE INDEX ON books(juvenile);
-        CREATE INDEX ON books(won_award);
 
         CREATE INDEX ON translations(newest_title_id);
 
-        CREATE INDEX ON book_contents(book_title_id);
-        CREATE INDEX ON book_contents(content_title_id);
+        CREATE INDEX ON contents(book_title_id);
+        CREATE INDEX ON contents(content_title_id);
         """
     )
 
@@ -175,19 +179,24 @@ def get_original_fields(title_id, parent_id, cur, psg_cur):
     if title_id != translations[0][0]:
         return False
 
-    for translation_id, translation_title, year, note_id in translations:
+    for translation_id, translation_title, tr_year, note_id in translations:
+
         if note_id:
             note = get_note(note_id, cur)
         else:
             note = None
+
+        if tr_year == 0 or tr_year == 8888:
+            tr_year = None
+
         psg_cur.execute("""
             INSERT INTO translations 
             (title_id, newest_title_id, title, year, note) 
             VALUES (%s, %s, %s, %s, %s);
-            """, (translation_id, title_id, translation_title, year, note))
+            """, (translation_id, title_id, translation_title, tr_year, note))
 
     original_lang = language_dict[original_lang]
-    if original_year == 0:
+    if original_year == 0 or original_year == 8888:
         original_year = None
 
     return original_lang, original_title, original_year
@@ -208,36 +217,39 @@ def get_pub_fields(title_id, root_id, ttype, alch_conn, psg_cur):
         alch_conn, params=[root_id, root_id])
 
 
-    # for novels and novellas, the edition count includes omnibus, 
-    # etc., as long as its actually a book not a periodical
-    if ttype == "NOVEL" or ttype == "NOVELLA":
-        books = all_pubs[( (all_pubs.pub_ctype == "NOVEL") | 
-                        (all_pubs.pub_ctype == "CHAPBOOK") |
-                        (all_pubs.pub_ctype == "ANTHOLOGY") |
-                        (all_pubs.pub_ctype == "COLLECTION") |
-                        (all_pubs.pub_ctype == "OMNIBUS") )]
-    else:
-        # ttype is ANTHOLOGY, COLLECTION or OMNIBUS and must match 
-        # the publication type exactly
-        books = all_pubs[( (all_pubs.pub_ctype == ttype) )]
+    en_books = all_pubs[( (all_pubs.pub_ctype == "NOVEL") | 
+                    (all_pubs.pub_ctype == "CHAPBOOK") |
+                    (all_pubs.pub_ctype == "ANTHOLOGY") |
+                    (all_pubs.pub_ctype == "COLLECTION") |
+                    (all_pubs.pub_ctype == "OMNIBUS") ) &
+                    (all_pubs.title_language == ENGLISH )]
 
-    editions = books[books.title_language == ENGLISH].shape[0]
-
-    # If the title was never published in book form, it probably isn't a
-    # good book club recommendation, since it is probably hard to find 
-    # and not very good. Stop processing this title
-    if editions == 0:
+    if en_books.shape[0] == 0:
+        # if not available as book in English, don't include this title
         return False
 
-    # For isbn, pages, and cover images, further filter Novels and 
-    # Novellas to the books where they are the primary content
-    if ttype == "NOVEL" or ttype == "NOVELLA":
-        books = books[(books.pub_ctype == "NOVEL") | 
-                        (books.pub_ctype == "CHAPBOOK")]
+    if ttype == "NOVELLA":
+        en_editions = en_books[ (en_books.pub_ctype == "CHAPBOOK") ]
+        all_editions = all_pubs[ (all_pubs.pub_ctype == "CHAPBOOK") ]
+    else:
+        en_editions = en_books[( (en_books.pub_ctype == ttype) )]
+        all_editions = all_pubs[( (all_pubs.pub_ctype == ttype) )]
+
+    editions = en_editions.shape[0]
+    if editions:
+        stand_alone = True
+    else:
+        # This title (probably a novella) was never published on its own.
+        # Don't look for publication related information
+        stand_alone = False
+        pages = cover_image = isbn = None
+        return stand_alone, editions, pages, cover_image, isbn
+
+
 
     # map all remaining ISBNs to this title_id in the isbn table
-    all_book_isbns = books[( (books.pub_isbn.notnull()) & 
-                            (books.pub_isbn != '') )]\
+    all_book_isbns = all_editions[( (all_editions.pub_isbn.notnull()) & 
+                            (all_editions.pub_isbn != '') )]\
                             .pub_isbn.drop_duplicates().to_list()
 
     # Insert all isbns into the isbn table 
@@ -250,8 +262,51 @@ def get_pub_fields(title_id, root_id, ttype, alch_conn, psg_cur):
             """, (book_isbn, title_id)
         )
 
-    # Only deal with English editions from this point on
-    books = books[ books.title_language == ENGLISH]
+    # # for novels and novellas, the edition count includes omnibus, 
+    # # etc., as long as its actually a book not a periodical
+    # if ttype == "NOVEL" or ttype == "NOVELLA":
+    #     books = all_pubs[( (all_pubs.pub_ctype == "NOVEL") | 
+    #                     (all_pubs.pub_ctype == "CHAPBOOK") |
+    #                     (all_pubs.pub_ctype == "ANTHOLOGY") |
+    #                     (all_pubs.pub_ctype == "COLLECTION") |
+    #                     (all_pubs.pub_ctype == "OMNIBUS") )]
+    # else:
+    #     # ttype is ANTHOLOGY, COLLECTION or OMNIBUS and must match 
+    #     # the publication type exactly
+    #     books = all_pubs[( (all_pubs.pub_ctype == ttype) )]
+
+    # editions = books[books.title_language == ENGLISH].shape[0]
+
+    # # If the title was never published in book form, it probably isn't a
+    # # good book club recommendation, since it is probably hard to find 
+    # # and not very good. Stop processing this title
+    # if editions == 0:
+    #     return False
+
+    # # For isbn, pages, and cover images, further filter Novels and 
+    # # Novellas to the books where they are the primary content
+    # if ttype == "NOVEL" or ttype == "NOVELLA":
+    #     books = books[(books.pub_ctype == "NOVEL") | 
+    #                     (books.pub_ctype == "CHAPBOOK")]
+
+    # # map all remaining ISBNs to this title_id in the isbn table
+    # all_book_isbns = books[( (books.pub_isbn.notnull()) & 
+    #                         (books.pub_isbn != '') )]\
+    #                         .pub_isbn.drop_duplicates().to_list()
+
+    # # Insert all isbns into the isbn table 
+    # # so we can map from isbn to title_id
+    # for book_isbn in all_book_isbns:
+    #     psg_cur.execute("""
+    #         INSERT INTO isbns 
+    #         (isbn, title_id) 
+    #         VALUES (%s, %s);
+    #         """, (book_isbn, title_id)
+    #     )
+
+    # # Only deal with English editions from this point on
+    # books = books[ books.title_language == ENGLISH]
+
 
     # A key method to pass to sort_values to choose the best source for
     # page number and cover images. Which fields have higher priority, 
@@ -277,9 +332,9 @@ def get_pub_fields(title_id, root_id, ttype, alch_conn, psg_cur):
             return pub_column
 
     pages = None
-    books = books.sort_values(
+    all_editions = all_editions.sort_values(
         by=['title_id', 'pub_ptype', 'p_year', 'pub_id'], key=preferred_pubs)
-    for page_str in books.pub_pages:
+    for page_str in all_editions.pub_pages:
         # Might be in a format like: "vii+125+[10]" or "125+[10]"
         # try the second and then the first positions before giving up
         for ii in (1,0):
@@ -298,14 +353,14 @@ def get_pub_fields(title_id, root_id, ttype, alch_conn, psg_cur):
     # Don't consider binding type cover image for now
     # TODO: consider removing audio book or ebook covers 
     # if they cause a quality problem
-    books = books.sort_values(
+    all_editions = all_editions.sort_values(
         by=['title_id', 'p_year', 'pub_id'], key=preferred_pubs)
     # only keep external image links if they are from amazon or isfdb
-    preferred_covers = books[(books.pub_frontimage.notnull() ) &
-                            (books.pub_frontimage != '' ) &
-                        ( ('amazon.com' in str(books.pub_frontimage) ) |
-                        ('amazon.ca' in str(books.pub_frontimage) ) |
-                        ('isfdb.org' in str(books.pub_frontimage) ) )]\
+    preferred_covers = all_editions[(all_editions.pub_frontimage.notnull() ) &
+                            (all_editions.pub_frontimage != '' ) &
+                        ( ('amazon.com' in str(all_editions.pub_frontimage) ) |
+                        ('amazon.ca' in str(all_editions.pub_frontimage) ) |
+                        ('isfdb.org' in str(all_editions.pub_frontimage) ) )]\
                         .pub_frontimage.drop_duplicates().to_list()
 
     if preferred_covers:
@@ -322,17 +377,17 @@ def get_pub_fields(title_id, root_id, ttype, alch_conn, psg_cur):
     else:
         cover_image = None
 
-    preferred_isbns = books[((books.pub_isbn.notnull()) &
-                            (books.pub_isbn != '') &
-                            (books.pub_ptype.str.contains('audio') == False))]\
-                            .pub_isbn.to_list()
+    preferred_isbns = all_editions[((all_editions.pub_isbn.notnull()) &
+                    (all_editions.pub_isbn != '') &
+                    (all_editions.pub_ptype.str.contains('audio') == False))]\
+                    .pub_isbn.to_list()
 
     if preferred_isbns:
         isbn = preferred_isbns[0]
     else:
         isbn = None
 
-    return editions, pages, cover_image, isbn
+    return stand_alone, editions, pages, cover_image, isbn
 
 
 def get_alternate_titles(title_id, title, cur):
@@ -390,7 +445,7 @@ def get_wikipedia_link(title_id, cur):
     return wiki_links[0][0]
 
 
-def get_won_award(title_id, cur):
+def get_award_winner(title_id, cur):
     cur.execute("""
         SELECT award_id
         FROM awards
@@ -464,7 +519,7 @@ def get_series_strings(series_id, seriesnum, seriesnum_2, cur):
         series_str_2 += ("and " + parent_series[-1] + " series.")
     return series_str_1, series_str_2
 
-def populate_book_contents_table(title_id, cur, psg_cur):
+def populate_contents_table(title_id, cur, psg_cur):
     # Use the pub_content table to find all novels or novellas in the book
     cur.execute("""
         SELECT distinct t.title_id
@@ -486,7 +541,7 @@ def populate_book_contents_table(title_id, cur, psg_cur):
     content_ids = cur.fetchall()
     for content_id in content_ids:
         psg_cur.execute("""
-            INSERT INTO book_contents 
+            INSERT INTO contents 
             (book_title_id, content_title_id) 
             VALUES (%s, %s);
             """, (title_id, content_id)

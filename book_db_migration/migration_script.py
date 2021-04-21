@@ -3,7 +3,16 @@ from time import time
 import datetime
 start = time()
 value = datetime.datetime.fromtimestamp(start)
-print(value.strftime('%Y-%m-%d %H:%M:%S'))
+print(str(value))
+
+
+import logging.config
+import logging
+log_path = "/tmp/" + str(value).split('.')[0] + ".log"
+logging.basicConfig(filename=log_path, level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+logger.info("{}\tStarting Logging".format(str(value)))
 
 import mysql.connector
 from mysql.connector import (connection)
@@ -64,7 +73,7 @@ cur.execute("""
         FROM  canonical_author 
         WHERE author_id in (4853, 2857, 319407)
     )
-    LIMIT 1000
+    -- LIMIT 1000
     ; """, (ENGLISH,))
 titles = cur.fetchall()
 books = []
@@ -113,7 +122,7 @@ for title_id, title, synopsis_id, note_id, series_id, seriesnum, \
         if ttype == "SHORTFICTION":
             ttype = "NOVELLA"
         elif ttype in ['COLLECTION', 'ANTHOLOGY', 'OMNIBUS']:
-            populate_book_contents_table(title_id, cur, psg_cur)
+            populate_contents_table(title_id, cur, psg_cur)
             psg_conn.commit()
 
         pub_fields = get_pub_fields(
@@ -123,9 +132,9 @@ for title_id, title, synopsis_id, note_id, series_id, seriesnum, \
             continue
 
         psg_conn.commit()
-        editions, pages, cover_image, isbn = pub_fields
+        stand_alone, editions, pages, cover_image, isbn = pub_fields
 
-        if year == 0:
+        if year == 0 or year == 8888:
             year = None
 
         if title_jvn == 'Yes':
@@ -143,7 +152,7 @@ for title_id, title, synopsis_id, note_id, series_id, seriesnum, \
 
         wikipedia = get_wikipedia_link(title_id, cur)
 
-        won_award = get_won_award(title_id, cur)
+        award_winner = get_award_winner(title_id, cur)
 
         if synopsis_id:
             synopsis = get_synopsis(synopsis_id, cur)
@@ -167,19 +176,19 @@ for title_id, title, synopsis_id, note_id, series_id, seriesnum, \
             INSERT INTO books 
             (title_id, title, year, authors, book_type, isbn, pages, editions, 
             alt_titles, series_str_1, series_str_2, original_lang, 
-            original_title, original_year, isfdb_rating, won_award, juvenile, 
-            cover_image, wikipedia, synopsis, note) 
+            original_title, original_year, isfdb_rating, award_winner, 
+            juvenile, stand_alone, cover_image, wikipedia, synopsis, note) 
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
             """, (title_id, title, year, authors, ttype, isbn, pages, editions,
             alt_titles, series_str_1, series_str_2, original_lang, 
-            original_title, original_year, rating, won_award, juvenile, 
-            cover_image, wikipedia, synopsis, note))
+            original_title, original_year, rating, award_winner, juvenile, 
+            stand_alone, cover_image, wikipedia, synopsis, note))
         psg_conn.commit()
 
-    except Exception as e:
-        print("\nERROR: {}\t{}".format(title_id, title))
-        print(e)
+    except Exception:
+        logger.exception("\nERROR: {}\t{}".format(title_id, title))
+
         psg_cur.close()
         psg_conn.close()
         psg_conn = psycopg2.connect(db_conn_string)
@@ -198,5 +207,5 @@ psg_conn.close()
 
 end = time()
 total_time = (end - start) / 60
-print("#]")
+print("]")
 print("total time: {} minutes".format(total_time))
