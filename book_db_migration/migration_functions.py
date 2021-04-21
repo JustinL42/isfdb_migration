@@ -469,7 +469,7 @@ def get_synopsis(synopsis_id, cur):
         WHERE note_id = %s
         LIMIT 1;
         """, (synopsis_id,))
-    synopsis = cur.fetchone()[0]
+    return cur.fetchone()[0]
 
 
 def get_note(note_id, cur):
@@ -479,7 +479,7 @@ def get_note(note_id, cur):
         WHERE note_id = %s
         LIMIT 1;
         """, (note_id,))
-    note = cur.fetchone()[0]
+    return cur.fetchone()[0]
 
 def get_series_strings(series_id, seriesnum, seriesnum_2, cur):
     cur.execute("""
