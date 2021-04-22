@@ -48,29 +48,31 @@ def process_title(title_data):
             # work, or it is an English translation but not the most
             # recent. Skip it an wait to process the better title.
             return False
-        dest_conn.commit()
+        # dest_conn.commit()
         
-        original_lang, original_title, original_year = original_fields
         root_id = parent_id
+        original_lang, original_title, \
+            original_year, translations = original_fields
     else:
         root_id = title_id
         original_lang = "English"
-        original_title = original_year = None
+        original_title = original_year = translations = None
 
     if ttype == "SHORTFICTION":
         ttype = "NOVELLA"
     elif ttype in ['COLLECTION', 'ANTHOLOGY', 'OMNIBUS']:
-        populate_contents_table(title_id, source_cur, dest_cur)
-        dest_conn.commit()
+        contents = populate_contents_table(title_id, source_cur)
+        # dest_conn.commit()
 
     pub_fields = get_pub_fields(
-        source_title_id, root_id, ttype, alch_conn, dest_cur)
+        title_id, root_id, ttype, source_alch_conn)
     if not pub_fields:
         # this title isn't available in book form
         return False
 
-    dest_conn.commit()
-    stand_alone, editions, pages, cover_image, isbn = pub_fields
+    # dest_conn.commit()
+    stand_alone, editions, pages, \
+        cover_image, isbn, all_isbns, more_images = pub_fields
 
     if year == 0 or year == 8888:
         year = None
@@ -129,6 +131,7 @@ if __name__ == '__main__':
     start = datetime.now()
     log_path = "/tmp/" + str(start).split('.')[0] + ".log"
     logging.basicConfig(filename=log_path, level=logging.INFO)
+    # logging.basicConfig(level=logging.INFO, handlers=[logging.StreamHandler(sys.stdout)])
     logger = logging.getLogger(__name__)
     logger.info("{}\tStarting Logging".format(str(start)))
 

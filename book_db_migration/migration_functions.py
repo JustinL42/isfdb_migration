@@ -169,7 +169,7 @@ def get_all_titles(cur, limit=None):
     return cur.fetchall()
 
 
-def get_original_fields(title_id, parent_id, cur, language_dict, dest_cur):
+def get_original_fields(title_id, parent_id, cur, language_dict):
     cur.execute("""
         SELECT original.title_title, 
             YEAR(original.title_copyright) as original_year, 
@@ -204,6 +204,7 @@ def get_original_fields(title_id, parent_id, cur, language_dict, dest_cur):
     if title_id != translations[0][0]:
         return False
 
+    translations = {}
     for translation_id, translation_title, tr_year, note_id in translations:
 
         if note_id:
@@ -214,20 +215,23 @@ def get_original_fields(title_id, parent_id, cur, language_dict, dest_cur):
         if tr_year == 0 or tr_year == 8888:
             tr_year = None
 
-        dest_cur.execute("""
-            INSERT INTO translations 
-            (title_id, newest_title_id, title, year, note) 
-            VALUES (%s, %s, %s, %s, %s);
-            """, (translation_id, title_id, translation_title, tr_year, note))
+        translations.append(
+            [(translation_id, title_id, translation_title, tr_year, note)])
+
+        # dest_cur.execute("""
+        #     INSERT INTO translations 
+        #     (title_id, newest_title_id, title, year, note) 
+        #     VALUES (%s, %s, %s, %s, %s);
+        #     """, (translation_id, title_id, translation_title, tr_year, note))
 
     original_lang = language_dict[original_lang]
     if original_year == 0 or original_year == 8888:
         original_year = None
 
-    return original_lang, original_title, original_year
+    return original_lang, original_title, original_year, translations
 
 
-def get_pub_fields(title_id, root_id, ttype, alch_conn, dest_cur):
+def get_pub_fields(title_id, root_id, ttype, source_alch_conn):
     all_pubs = pd.read_sql("""
         SELECT t.title_id, t.title_language, p.pub_id, 
             YEAR(p.pub_year) as p_year, p.pub_pages, p.pub_ptype, 
@@ -239,7 +243,7 @@ def get_pub_fields(title_id, root_id, ttype, alch_conn, dest_cur):
             ON t.title_id = c.title_id
             WHERE t.title_id = %s
             OR t.title_parent = %s;""", 
-        alch_conn, params=[root_id, root_id])
+        source_alch_conn, params=[root_id, root_id])
 
 
     en_books = all_pubs[( (all_pubs.pub_ctype == "NOVEL") | 
@@ -267,25 +271,26 @@ def get_pub_fields(title_id, root_id, ttype, alch_conn, dest_cur):
         # This title (probably a novella) was never published on its own.
         # Don't look for publication related information
         stand_alone = False
-        pages = cover_image = isbn = None
-        return stand_alone, editions, pages, cover_image, isbn
+        pages = cover_image = isbn = all_isbns = more_images = None
+        return stand_alone, editions, pages, cover_image, \
+            isbn, all_isbns, more_images
 
 
 
     # map all remaining ISBNs to this title_id in the isbn table
-    all_book_isbns = all_editions[( (all_editions.pub_isbn.notnull()) & 
+    all_isbns = all_editions[( (all_editions.pub_isbn.notnull()) & 
                             (all_editions.pub_isbn != '') )]\
                             .pub_isbn.drop_duplicates().to_list()
 
-    # Insert all isbns into the isbn table 
-    # so we can map from isbn to title_id
-    for book_isbn in all_book_isbns:
-        dest_cur.execute("""
-            INSERT INTO isbns 
-            (isbn, title_id) 
-            VALUES (%s, %s);
-            """, (book_isbn, title_id)
-        )
+    # # Insert all isbns into the isbn table 
+    # # so we can map from isbn to title_id
+    # for book_isbn in all_book_isbns:
+    #     dest_cur.execute("""
+    #         INSERT INTO isbns 
+    #         (isbn, title_id) 
+    #         VALUES (%s, %s);
+    #         """, (book_isbn, title_id)
+    #     )
 
     # A key method to pass to sort_values to choose the best source for
     # page number and cover images. Which fields have higher priority, 
@@ -344,17 +349,18 @@ def get_pub_fields(title_id, root_id, ttype, alch_conn, dest_cur):
 
     if preferred_covers:
         cover_image = preferred_covers[0]
+        more_images = [i[0] for i in preferred_covers[1:]]
 
-        # insert additional covers into their own table
-        for image in preferred_covers[1:]:
-            dest_cur.execute("""
-                INSERT INTO more_images 
-                (title_id, image) 
-                VALUES (%s, %s);
-            """, (title_id, image)
-            )
+        # # insert additional covers into their own table
+        # for image in preferred_covers[1:]:
+        #     dest_cur.execute("""
+        #         INSERT INTO more_images 
+        #         (title_id, image) 
+        #         VALUES (%s, %s);
+        #     """, (title_id, image)
+        #     )
     else:
-        cover_image = None
+        cover_image = more_images = None
 
     preferred_isbns = all_editions[((all_editions.pub_isbn.notnull()) &
                     (all_editions.pub_isbn != '') &
@@ -366,7 +372,8 @@ def get_pub_fields(title_id, root_id, ttype, alch_conn, dest_cur):
     else:
         isbn = None
 
-    return stand_alone, editions, pages, cover_image, isbn
+    return stand_alone, editions, pages, cover_image, \
+        isbn, all_isbns, more_images
 
 
 def get_alternate_titles(title_id, title, cur):
