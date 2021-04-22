@@ -1,53 +1,32 @@
-import mysql.connector
-from mysql.connector import (connection)
-from sqlalchemy import create_engine
-import psycopg2
 import pandas as pd
-import pymysql
 
-import logging
-logger = logging.getLogger(__name__)
+# Code from languages table
+# Default is 17 for English
+my_lang = 17
+excluded_authurs = [4853, 2857, 319407]
 
-
-db_conn_string = "dbname=rec_system user=postgres"
-
-conn = mysql.connector.connect(
-    host="localhost",
-    user="root",
-    password="",
-    database="isfdb",
-)
-cur = conn.cursor()
-cur.execute("select lang_id, lang_name from languages;")
-language_dict = dict(cur.fetchall())
-
-# The id number for English in the languages table
-ENGLISH = 17
-
-def attempt_delete_rec_system_db(psg_cur):
-    # the drop database command is commented out to prevent accidentally
-    # deleting irrecoverable data. It isn't needed during the initial ETL
-    # but can be uncommented if the ETL needs to be modified and re-run.
-    print("Attempting to delete the rec_system database...")
-    psg_cur.execute("DROP DATABASE IF EXISTS rec_system;")
-
-    try:
-        print("Creating rec_system database...")
-        psg_cur.execute("CREATE DATABASE rec_system;")
-    except psycopg2.errors.DatabaseError:
-        errorMessage = (
-        "ERROR: The rec_system database already exists. If you really "
-        "want to delete it and any new data that may have been added, "
-        "uncomment the 'DROP DATABASE IF EXISTS' line in the script and "
-        "rerun it. Alternately, switch to a different database name")
-        print(errorMessage)
+def safe_drop_tables(tables, dest_cur):
+    print("Are you sure you want to drop these tables/types " + \
+        "and permanently lose any data they may contain?\n")
+    for table in tables:
+        print(table)
+    print()
+    value = input("If yes, type DROP\n")
+    if value != 'DROP':
+        print("Not dropping tables")
         return False
+    print("Dropping tables...")
+    for table in tables:
+        dest_cur.execute("DROP table IF EXISTS {};".format(table))
+    for sql_type in tables:
+        dest_cur.execute("DROP type IF EXISTS {};".format(table))
     return True
 
-def prepare_books_tables(psg_cur):
+
+def prepare_books_tables(dest_cur):
 
     print("Creating tables...")
-    psg_cur.execute("""
+    dest_cur.execute("""
 
         CREATE TYPE ttype as ENUM (
             'NOVEL', 'NOVELLA', 'ANTHOLOGY', 'COLLECTION', 'OMNIBUS');
@@ -69,7 +48,7 @@ def prepare_books_tables(psg_cur):
             original_title      text default NULL,
             original_year       text default NULL,
             isfdb_rating        real default NULL, 
-            award_winner           boolean default FALSE,
+            award_winner        boolean default FALSE,
             juvenile            boolean default FALSE,
             stand_alone         boolean default FALSE,
             cover_image         text default NULL CHECK (cover_image <> ''),
@@ -109,9 +88,9 @@ def prepare_books_tables(psg_cur):
         """
     )
 
-def constrain_and_index_book_tables(psg_cur):
+def constrain_book_tables(dest_cur):
     print("Index tables...")
-    psg_cur.execute("""
+    dest_cur.execute("""
         ALTER TABLE isbns 
         ADD FOREIGN KEY (title_id) 
         REFERENCES books(title_id);
@@ -127,8 +106,12 @@ def constrain_and_index_book_tables(psg_cur):
         ALTER TABLE contents 
         ADD FOREIGN KEY (content_title_id) 
         REFERENCES books(title_id);
+        """
+    )
 
-
+def index_book_tables(dest_cur):
+    print("Index tables...")
+    dest_cur.execute("""
         CREATE INDEX ON books(book_type);
         CREATE INDEX ON books(isbn);
         CREATE INDEX ON books(original_lang);
@@ -140,11 +123,53 @@ def constrain_and_index_book_tables(psg_cur):
 
         CREATE INDEX ON contents(book_title_id);
         CREATE INDEX ON contents(content_title_id);
+
+        CREATE INDEX ON more_images(title_id);
         """
     )
 
 
-def get_original_fields(title_id, parent_id, cur, psg_cur):
+def get_language_dict(cur):
+    cur.execute("""
+        SELECT lang_id, lang_name 
+        FROM languages;
+        """
+    )
+    return dict(cur.fetchall())
+
+
+
+# Get all the novels, novellas, collections, and omnibuses 
+# where a my_lang version exists, 
+# and which aren't non-genre, graphic novels, or by an excluded author
+def get_all_titles(cur, limit=None):
+    print("main title table query...")
+    sql = """
+        SELECT title_id, title_title, title_synopsis, note_id, series_id, 
+            title_seriesnum, YEAR(title_copyright) as year, title_ttype, 
+            title_parent, title_rating, title_seriesnum_2, title_jvn
+        FROM titles  
+        WHERE ( 
+            (title_ttype = 'SHORTFICTION' AND title_storylen = 'novella') 
+            OR title_ttype IN ('ANTHOLOGY', 'COLLECTION', 'NOVEL', 'OMNIBUS')
+        ) 
+        AND title_language = {}
+        AND title_non_genre != 'Yes' 
+        AND title_graphic != 'Yes'
+        AND title_id NOT IN (
+            SELECT title_id 
+            FROM  canonical_author 
+            WHERE author_id in ({})
+        )""".format(my_lang, ",". join([str(a) for a in excluded_authurs]))
+
+    if limit:
+        sql += "\nLIMIT " + str(limit)
+
+    cur.execute(sql)
+    return cur.fetchall()
+
+
+def get_original_fields(title_id, parent_id, cur, language_dict, dest_cur):
     cur.execute("""
         SELECT original.title_title, 
             YEAR(original.title_copyright) as original_year, 
@@ -158,13 +183,13 @@ def get_original_fields(title_id, parent_id, cur, psg_cur):
     original_title, original_year, original_lang = cur.fetchone()
 
 
-    # If the original language is also English, this is just a variant title.
+    # If the original language is also my_lang, this is just a variant title.
     # Process this title when the loop is the parent title instead.
-    if original_lang == ENGLISH:
+    if original_lang == my_lang:
         return False
 
-    # The title an English translation of a foreign language work.
-    # Get all the English translations
+    # The title is a translation of a foreign language work into my_lang.
+    # Get all the my_lang translations
     cur.execute("""
         SELECT title_id, title_title as translation_title, 
             YEAR(title_copyright) as translation_year, note_id 
@@ -172,7 +197,7 @@ def get_original_fields(title_id, parent_id, cur, psg_cur):
         WHERE title_language = %s 
         AND title_parent = %s 
         ORDER BY translation_year DESC, title_id DESC ;
-        """, (ENGLISH, parent_id))
+        """, (my_lang, parent_id))
     translations = cur.fetchall()
 
     # Wait to process this work if we aren't on the most recent translation
@@ -189,7 +214,7 @@ def get_original_fields(title_id, parent_id, cur, psg_cur):
         if tr_year == 0 or tr_year == 8888:
             tr_year = None
 
-        psg_cur.execute("""
+        dest_cur.execute("""
             INSERT INTO translations 
             (title_id, newest_title_id, title, year, note) 
             VALUES (%s, %s, %s, %s, %s);
@@ -202,7 +227,7 @@ def get_original_fields(title_id, parent_id, cur, psg_cur):
     return original_lang, original_title, original_year
 
 
-def get_pub_fields(title_id, root_id, ttype, alch_conn, psg_cur):
+def get_pub_fields(title_id, root_id, ttype, alch_conn, dest_cur):
     all_pubs = pd.read_sql("""
         SELECT t.title_id, t.title_language, p.pub_id, 
             YEAR(p.pub_year) as p_year, p.pub_pages, p.pub_ptype, 
@@ -222,10 +247,10 @@ def get_pub_fields(title_id, root_id, ttype, alch_conn, psg_cur):
                     (all_pubs.pub_ctype == "ANTHOLOGY") |
                     (all_pubs.pub_ctype == "COLLECTION") |
                     (all_pubs.pub_ctype == "OMNIBUS") ) &
-                    (all_pubs.title_language == ENGLISH )]
+                    (all_pubs.title_language == my_lang )]
 
     if en_books.shape[0] == 0:
-        # if not available as book in English, don't include this title
+        # if not available as book in my_lang, don't include this title
         return False
 
     if ttype == "NOVELLA":
@@ -255,58 +280,12 @@ def get_pub_fields(title_id, root_id, ttype, alch_conn, psg_cur):
     # Insert all isbns into the isbn table 
     # so we can map from isbn to title_id
     for book_isbn in all_book_isbns:
-        psg_cur.execute("""
+        dest_cur.execute("""
             INSERT INTO isbns 
             (isbn, title_id) 
             VALUES (%s, %s);
             """, (book_isbn, title_id)
         )
-
-    # # for novels and novellas, the edition count includes omnibus, 
-    # # etc., as long as its actually a book not a periodical
-    # if ttype == "NOVEL" or ttype == "NOVELLA":
-    #     books = all_pubs[( (all_pubs.pub_ctype == "NOVEL") | 
-    #                     (all_pubs.pub_ctype == "CHAPBOOK") |
-    #                     (all_pubs.pub_ctype == "ANTHOLOGY") |
-    #                     (all_pubs.pub_ctype == "COLLECTION") |
-    #                     (all_pubs.pub_ctype == "OMNIBUS") )]
-    # else:
-    #     # ttype is ANTHOLOGY, COLLECTION or OMNIBUS and must match 
-    #     # the publication type exactly
-    #     books = all_pubs[( (all_pubs.pub_ctype == ttype) )]
-
-    # editions = books[books.title_language == ENGLISH].shape[0]
-
-    # # If the title was never published in book form, it probably isn't a
-    # # good book club recommendation, since it is probably hard to find 
-    # # and not very good. Stop processing this title
-    # if editions == 0:
-    #     return False
-
-    # # For isbn, pages, and cover images, further filter Novels and 
-    # # Novellas to the books where they are the primary content
-    # if ttype == "NOVEL" or ttype == "NOVELLA":
-    #     books = books[(books.pub_ctype == "NOVEL") | 
-    #                     (books.pub_ctype == "CHAPBOOK")]
-
-    # # map all remaining ISBNs to this title_id in the isbn table
-    # all_book_isbns = books[( (books.pub_isbn.notnull()) & 
-    #                         (books.pub_isbn != '') )]\
-    #                         .pub_isbn.drop_duplicates().to_list()
-
-    # # Insert all isbns into the isbn table 
-    # # so we can map from isbn to title_id
-    # for book_isbn in all_book_isbns:
-    #     psg_cur.execute("""
-    #         INSERT INTO isbns 
-    #         (isbn, title_id) 
-    #         VALUES (%s, %s);
-    #         """, (book_isbn, title_id)
-    #     )
-
-    # # Only deal with English editions from this point on
-    # books = books[ books.title_language == ENGLISH]
-
 
     # A key method to pass to sort_values to choose the best source for
     # page number and cover images. Which fields have higher priority, 
@@ -314,7 +293,7 @@ def get_pub_fields(title_id, root_id, ttype, alch_conn, psg_cur):
     def preferred_pubs(pub_column):
         if pub_column.name == 'title_id':
             # Favor the curent title_id above all else, which is either 
-            #the parent title or the most recent English translation
+            #the parent title or the most recent my_lang translation
             favor_title_id = lambda id : 1 if id == title_id else 2
             return pub_column.map(favor_title_id)
         elif pub_column.name == 'pub_ptype':
@@ -368,7 +347,7 @@ def get_pub_fields(title_id, root_id, ttype, alch_conn, psg_cur):
 
         # insert additional covers into their own table
         for image in preferred_covers[1:]:
-            psg_cur.execute("""
+            dest_cur.execute("""
                 INSERT INTO more_images 
                 (title_id, image) 
                 VALUES (%s, %s);
@@ -398,7 +377,7 @@ def get_alternate_titles(title_id, title, cur):
     AND title_language = %s
     AND title_title != %s
     AND title_title NOT REGEXP 'part [[:digit:]]+ of [[:digit:]]+|boxed set'
-    """, (title_id, ENGLISH, title))
+    """, (title_id, my_lang, title))
     title_set = set([r[0] for r in cur.fetchall()]) - set(title)
     
     if not title_set:
@@ -519,7 +498,7 @@ def get_series_strings(series_id, seriesnum, seriesnum_2, cur):
         series_str_2 += ("and " + parent_series[-1] + " series.")
     return series_str_1, series_str_2
 
-def populate_contents_table(title_id, cur, psg_cur):
+def populate_contents_table(title_id, cur, dest_cur):
     # Use the pub_content table to find all novels or novellas in the book
     cur.execute("""
         SELECT distinct t.title_id
@@ -536,11 +515,11 @@ def populate_contents_table(title_id, cur, psg_cur):
                 t.title_ttype = 'SHORTFICTION'
                 AND t.title_storylen = 'novella'
             )
-        );""", (title_id, ENGLISH)
+        );""", (title_id, my_lang)
     )
     content_ids = cur.fetchall()
     for content_id in content_ids:
-        psg_cur.execute("""
+        dest_cur.execute("""
             INSERT INTO contents 
             (book_title_id, content_title_id) 
             VALUES (%s, %s);
