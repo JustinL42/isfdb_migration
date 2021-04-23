@@ -29,7 +29,8 @@ def prepare_books_tables(dest_cur):
     dest_cur.execute("""
 
         CREATE TYPE ttype as ENUM (
-            'NOVEL', 'NOVELLA', 'ANTHOLOGY', 'COLLECTION', 'OMNIBUS');
+            'NOVEL', 'NOVELLA', 'ANTHOLOGY', 'COLLECTION', 'OMNIBUS'
+        );
 
 
         CREATE TABLE books (
@@ -62,12 +63,14 @@ def prepare_books_tables(dest_cur):
         CREATE TABLE isbns (
             id          serial PRIMARY KEY,
             isbn        varchar(13) NOT NULL CHECK (isbn <> ''),
-            title_id    integer NOT NULL
+            title_id    integer NOT NULL REFERENCES books (title_id)
+            -- ,
+            -- PRIMARY KEY (isbn)
         );
 
         CREATE TABLE translations (
             title_id            integer NOT NULL,
-            newest_title_id     integer NOT NULL,
+            newest_title_id     integer NOT NULL REFERENCES books (title_id),
             title               text NOT NULL CHECK (title <> ''),
             year                integer default NULL,
             note                text default NULL,
@@ -76,38 +79,18 @@ def prepare_books_tables(dest_cur):
 
         CREATE TABLE contents (
             id                  serial PRIMARY KEY,
-            book_title_id       integer NOT NULL,
-            content_title_id    integer NOT NULL
+            book_title_id       integer NOT NULL REFERENCES books (title_id),
+            content_title_id    integer NOT NULL REFERENCES books (title_id)
         );
 
         CREATE TABLE more_images (
             id          serial PRIMARY KEY,
-            title_id    integer NOT NULL,
+            title_id    integer NOT NULL REFERENCES books (title_id),
             image       text default NULL CHECK (image <> '')
         )
         """
     )
 
-def constrain_book_tables(dest_cur):
-    print("Index tables...")
-    dest_cur.execute("""
-        ALTER TABLE isbns 
-        ADD FOREIGN KEY (title_id) 
-        REFERENCES books(title_id);
-
-        ALTER TABLE translations 
-        ADD FOREIGN KEY (newest_title_id) 
-        REFERENCES books(title_id);
-
-        ALTER TABLE contents 
-        ADD FOREIGN KEY (book_title_id) 
-        REFERENCES books(title_id);
-
-        ALTER TABLE contents 
-        ADD FOREIGN KEY (content_title_id) 
-        REFERENCES books(title_id);
-        """
-    )
 
 def index_book_tables(dest_cur):
     print("Index tables...")
@@ -129,20 +112,20 @@ def index_book_tables(dest_cur):
     )
 
 
-def get_language_dict(cur):
-    cur.execute("""
+def get_language_dict(source_cur):
+    source_cur.execute("""
         SELECT lang_id, lang_name 
         FROM languages;
         """
     )
-    return dict(cur.fetchall())
+    return dict(source_cur.fetchall())
 
 
 
 # Get all the novels, novellas, collections, and omnibuses 
 # where a my_lang version exists, 
 # and which aren't non-genre, graphic novels, or by an excluded author
-def get_all_titles(cur, limit=None):
+def get_all_titles(source_cur, limit=None):
     print("main title table query...")
     sql = """
         SELECT title_id, title_title, title_synopsis, note_id, series_id, 
@@ -165,12 +148,12 @@ def get_all_titles(cur, limit=None):
     if limit:
         sql += "\nLIMIT " + str(limit)
 
-    cur.execute(sql)
-    return cur.fetchall()
+    source_cur.execute(sql)
+    return source_cur.fetchall()
 
 
-def get_original_fields(title_id, parent_id, cur, language_dict):
-    cur.execute("""
+def get_original_fields(title_id, parent_id, source_cur, language_dict):
+    source_cur.execute("""
         SELECT original.title_title, 
             YEAR(original.title_copyright) as original_year, 
             original.title_language
@@ -180,7 +163,7 @@ def get_original_fields(title_id, parent_id, cur, language_dict):
         WHERE original.title_id = %s
         LIMIT 1;
         """, (parent_id,))
-    original_title, original_year, original_lang = cur.fetchone()
+    original_title, original_year, original_lang = source_cur.fetchone()
 
 
     # If the original language is also my_lang, this is just a variant title.
@@ -188,9 +171,13 @@ def get_original_fields(title_id, parent_id, cur, language_dict):
     if original_lang == my_lang:
         return False
 
+    original_lang = language_dict[original_lang]
+    if original_year == 0 or original_year == 8888:
+        original_year = None
+
     # The title is a translation of a foreign language work into my_lang.
     # Get all the my_lang translations
-    cur.execute("""
+    source_cur.execute("""
         SELECT title_id, title_title as translation_title, 
             YEAR(title_copyright) as translation_year, note_id 
         FROM titles 
@@ -198,35 +185,30 @@ def get_original_fields(title_id, parent_id, cur, language_dict):
         AND title_parent = %s 
         ORDER BY translation_year DESC, title_id DESC ;
         """, (my_lang, parent_id))
-    translations = cur.fetchall()
+    preferred_translations = source_cur.fetchall()
 
     # Wait to process this work if we aren't on the most recent translation
-    if title_id != translations[0][0]:
+    if title_id != preferred_translations[0][0]:
         return False
 
-    translations = {}
-    for translation_id, translation_title, tr_year, note_id in translations:
+    # now sort oldest to newest
+    preferred_translations.reverse()
 
-        if note_id:
-            note = get_note(note_id, cur)
-        else:
-            note = None
+    translations = []
 
+    for tr in preferred_translations:
+        tr_year = tr[2]
         if tr_year == 0 or tr_year == 8888:
             tr_year = None
 
-        translations.append(
-            [(translation_id, title_id, translation_title, tr_year, note)])
+        note_id = tr[3]
+        if note_id:
+            note = get_note(note_id, source_cur)
+        else:
+            note = None
 
-        # dest_cur.execute("""
-        #     INSERT INTO translations 
-        #     (title_id, newest_title_id, title, year, note) 
-        #     VALUES (%s, %s, %s, %s, %s);
-        #     """, (translation_id, title_id, translation_title, tr_year, note))
+        translations.append( (tr[0], tr[1], tr_year, note) )
 
-    original_lang = language_dict[original_lang]
-    if original_year == 0 or original_year == 8888:
-        original_year = None
 
     return original_lang, original_title, original_year, translations
 
@@ -269,9 +251,11 @@ def get_pub_fields(title_id, root_id, ttype, source_alch_conn):
         stand_alone = True
     else:
         # This title (probably a novella) was never published on its own.
-        # Don't look for publication related information
+        # Don't look fall_isbnsor publication related information
         stand_alone = False
-        pages = cover_image = isbn = all_isbns = more_images = None
+        pages = cover_image = isbn = None
+        all_isbns = more_images = []
+
         return stand_alone, editions, pages, cover_image, \
             isbn, all_isbns, more_images
 
@@ -312,7 +296,7 @@ def get_pub_fields(title_id, root_id, ttype, source_alch_conn):
             # Make it negative to affect a descending sort on year or id
             return -pub_column
         else:
-            print("Invalid column passed to preferred_pubs")
+            raise Exception("Invalid column passed to preferred_pubs")
             return pub_column
 
     pages = None
@@ -349,7 +333,9 @@ def get_pub_fields(title_id, root_id, ttype, source_alch_conn):
 
     if preferred_covers:
         cover_image = preferred_covers[0]
-        more_images = [i[0] for i in preferred_covers[1:]]
+        # more_images = [i[0] for i in preferred_covers[1:]]
+        more_images = preferred_covers[1:]
+
 
         # # insert additional covers into their own table
         # for image in preferred_covers[1:]:
@@ -360,7 +346,8 @@ def get_pub_fields(title_id, root_id, ttype, source_alch_conn):
         #     """, (title_id, image)
         #     )
     else:
-        cover_image = more_images = None
+        cover_image = None
+        more_images = []
 
     preferred_isbns = all_editions[((all_editions.pub_isbn.notnull()) &
                     (all_editions.pub_isbn != '') &
@@ -376,8 +363,8 @@ def get_pub_fields(title_id, root_id, ttype, source_alch_conn):
         isbn, all_isbns, more_images
 
 
-def get_alternate_titles(title_id, title, cur):
-    cur.execute("""
+def get_alternate_titles(title_id, title, source_cur):
+    source_cur.execute("""
     SELECT DISTINCT title_title
     FROM titles
     WHERE title_parent = %s
@@ -385,7 +372,7 @@ def get_alternate_titles(title_id, title, cur):
     AND title_title != %s
     AND title_title NOT REGEXP 'part [[:digit:]]+ of [[:digit:]]+|boxed set'
     """, (title_id, my_lang, title))
-    title_set = set([r[0] for r in cur.fetchall()]) - set(title)
+    title_set = set([r[0] for r in source_cur.fetchall()]) - set(title)
     
     if not title_set:
         return None
@@ -399,8 +386,8 @@ def get_alternate_titles(title_id, title, cur):
 
     return alt_titles
 
-def get_authors(title_id, cur):
-    cur.execute("""
+def get_authors(title_id, source_cur):
+    source_cur.execute("""
         SELECT author_canonical
         FROM authors
         WHERE author_id IN (
@@ -408,7 +395,7 @@ def get_authors(title_id, cur):
             FROM canonical_author
             WHERE title_id = %s
         );""", (title_id,))
-    authors_results = cur.fetchall()
+    authors_results = source_cur.fetchall()
 
     if not authors_results:
         return None
@@ -416,14 +403,14 @@ def get_authors(title_id, cur):
     return", ".join(authors_list)
 
 
-def get_wikipedia_link(title_id, cur):
-    cur.execute("""
+def get_wikipedia_link(title_id, source_cur):
+    source_cur.execute("""
         SELECT url
         FROM webpages
         WHERE title_id = %s 
         AND url like '%en.wikipedia.org%'
         """, (title_id,))
-    wiki_links = cur.fetchall()
+    wiki_links = source_cur.fetchall()
     # If there isn't exactly one wikipedia link, 
     # we can't guess which is the general link
     if len(wiki_links) != 1:
@@ -431,8 +418,8 @@ def get_wikipedia_link(title_id, cur):
     return wiki_links[0][0]
 
 
-def get_award_winner(title_id, cur):
-    cur.execute("""
+def get_award_winner(title_id, source_cur):
+    source_cur.execute("""
         SELECT award_id
         FROM awards
         WHERE award_id IN (
@@ -443,46 +430,46 @@ def get_award_winner(title_id, cur):
         AND award_level = 1
         LIMIT 1;
         """, (title_id,))
-    award_result = cur.fetchone()
+    award_result = source_cur.fetchone()
     return bool(award_result)
 
 
-def get_synopsis(synopsis_id, cur):
+def get_synopsis(synopsis_id, source_cur):
     #TODO: cleanup html tags in synopsis        
-    cur.execute("""
+    source_cur.execute("""
         SELECT note_note
         FROM notes
         WHERE note_id = %s
         LIMIT 1;
         """, (synopsis_id,))
-    return cur.fetchone()[0]
+    return source_cur.fetchone()[0]
 
 
-def get_note(note_id, cur):
-    cur.execute("""
+def get_note(note_id, source_cur):
+    source_cur.execute("""
         SELECT note_note
         FROM notes
         WHERE note_id = %s
         LIMIT 1;
         """, (note_id,))
-    return cur.fetchone()[0]
+    return source_cur.fetchone()[0]
 
-def get_series_strings(series_id, seriesnum, seriesnum_2, cur):
-    cur.execute("""
+def get_series_strings(series_id, seriesnum, seriesnum_2, source_cur):
+    source_cur.execute("""
         SELECT series_title, series_parent
         FROM series
         WHERE series_id = %s
         """, (series_id,))
-    series_title, series_parent = cur.fetchone()
+    series_title, series_parent = source_cur.fetchone()
 
     parent_series = []
     while series_parent:
-        cur.execute("""
+        source_cur.execute("""
             SELECT series_title, series_parent
             FROM series
             WHERE series_id = %s
             """, (series_parent,))
-        parent_title, series_parent = cur.fetchone()
+        parent_title, series_parent = source_cur.fetchone()
         parent_series.append(parent_title)
 
 
@@ -505,9 +492,9 @@ def get_series_strings(series_id, seriesnum, seriesnum_2, cur):
         series_str_2 += ("and " + parent_series[-1] + " series.")
     return series_str_1, series_str_2
 
-def populate_contents_table(title_id, cur, dest_cur):
+def get_contents(title_id, source_cur):
     # Use the pub_content table to find all novels or novellas in the book
-    cur.execute("""
+    source_cur.execute("""
         SELECT distinct t.title_id
         FROM titles as t
         JOIN pub_content as c1
@@ -524,11 +511,12 @@ def populate_contents_table(title_id, cur, dest_cur):
             )
         );""", (title_id, my_lang)
     )
-    content_ids = cur.fetchall()
-    for content_id in content_ids:
-        dest_cur.execute("""
-            INSERT INTO contents 
-            (book_title_id, content_title_id) 
-            VALUES (%s, %s);
-            """, (title_id, content_id)
-        )
+    return source_cur.fetchall()
+
+    # for content_id in content_ids:
+    #     dest_cur.execute("""
+    #         INSERT INTO contents 
+    #         (book_title_id, content_title_id) 
+    #         VALUES (%s, %s);
+    #         """, (title_id, content_id)
+    #     )
