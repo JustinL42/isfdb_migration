@@ -52,41 +52,51 @@ def prepare_books_tables(dest_cur):
             award_winner        boolean default FALSE,
             juvenile            boolean default FALSE,
             stand_alone         boolean default FALSE,
+            ambi_isbn           boolean default FALSE,
             cover_image         text default NULL CHECK (cover_image <> ''),
             wikipedia           text default NULL CHECK (wikipedia <> ''),
             synopsis            text default NULL,
             note                text default NULL,
-            -- UNIQUE(isbn),
             PRIMARY KEY (title_id)
         );
 
         CREATE TABLE isbns (
             id          serial PRIMARY KEY,
             isbn        varchar(13) NOT NULL CHECK (isbn <> ''),
-            title_id    integer NOT NULL REFERENCES books (title_id)
-            -- ,
-            -- PRIMARY KEY (isbn)
+            title_id    integer NOT NULL 
+                REFERENCES books (title_id) ON DELETE CASCADE,
+            UNIQUE (isbn, title_id)
         );
 
         CREATE TABLE translations (
             title_id            integer NOT NULL,
-            newest_title_id     integer NOT NULL REFERENCES books (title_id),
+            newest_title_id     integer NOT NULL 
+                REFERENCES books (title_id) ON DELETE CASCADE,
             title               text NOT NULL CHECK (title <> ''),
             year                integer default NULL,
             note                text default NULL,
-            PRIMARY KEY (title_id)
+            PRIMARY KEY (title_id),
+            UNIQUE (title_id, newest_title_id)
+
         );
 
         CREATE TABLE contents (
             id                  serial PRIMARY KEY,
-            book_title_id       integer NOT NULL REFERENCES books (title_id),
-            content_title_id    integer NOT NULL REFERENCES books (title_id)
+            book_title_id       integer NOT NULL 
+                REFERENCES books (title_id) ON DELETE CASCADE,
+            content_title_id    integer NOT NULL 
+                REFERENCES books (title_id) ON DELETE CASCADE
+                CONSTRAINT content_of_self 
+                    CHECK (content_title_id != book_title_id),
+            UNIQUE (book_title_id, content_title_id)
         );
 
         CREATE TABLE more_images (
             id          serial PRIMARY KEY,
-            title_id    integer NOT NULL REFERENCES books (title_id),
-            image       text default NULL CHECK (image <> '')
+            title_id    integer NOT NULL 
+                REFERENCES books (title_id) ON DELETE CASCADE,
+            image       text default NULL CHECK (image <> ''),
+            UNIQUE (title_id, image)
         )
         """
     )
@@ -492,31 +502,37 @@ def get_series_strings(series_id, seriesnum, seriesnum_2, source_cur):
         series_str_2 += ("and " + parent_series[-1] + " series.")
     return series_str_1, series_str_2
 
-def get_contents(title_id, source_cur):
+def get_contents(title_id, ttype, source_cur):
     # Use the pub_content table to find all novels or novellas in the book
     source_cur.execute("""
-        SELECT distinct t.title_id
-        FROM titles as t
-        JOIN pub_content as c1
-        ON t.title_id = c1.title_id
-            JOIN pub_content as c2
-            ON c1.pub_id = c2.pub_id
-        WHERE c2.title_id = %s
-        AND t.title_language = %s
+        SELECT DISTINCT t2.title_id
+        FROM titles AS t2
+        JOIN pub_content AS c2
+        ON t2.title_id = c2.title_id
+            JOIN pubs AS p
+            ON c2.pub_id = p.pub_id
+                JOIN pub_content AS c1
+                ON p.pub_id = c1.pub_id
+                    JOIN (
+                        SELECT %s AS title_id
+                        UNION
+                        SELECT title_id 
+                        FROM titles 
+                        WHERE title_parent = %s 
+                        AND title_language = %s
+                    ) AS t1
+                    ON t1.title_id = c1.title_id
+                WHERE p.pub_ctype = %s
         AND (
-            t.title_ttype = 'NOVEL' 
-            OR (
-                t.title_ttype = 'SHORTFICTION'
-                AND t.title_storylen = 'novella'
+            (
+                t2.title_ttype = 'SHORTFICTION'
+                AND
+                t2.title_storylen = 'novella'
             )
-        );""", (title_id, my_lang)
+            OR t2.title_ttype IN 
+            ('NOVEL', 'COLLECTION', 'ANTHOLOGY', 'OMNIBUS')
+        )
+        AND t2.title_id != %s;
+        """, (title_id, title_id, my_lang, ttype, title_id)
     )
     return source_cur.fetchall()
-
-    # for content_id in content_ids:
-    #     dest_cur.execute("""
-    #         INSERT INTO contents 
-    #         (book_title_id, content_title_id) 
-    #         VALUES (%s, %s);
-    #         """, (title_id, content_id)
-    #     )

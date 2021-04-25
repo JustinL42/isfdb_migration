@@ -15,9 +15,9 @@ import psycopg2
 from migration_functions import *
 
 PROGRESS_BAR = True
-N_PROC = -1
-LIMIT = None
-DEBUG = False
+N_PROC = -2
+LIMIT = 5000
+DEBUG = True
 # The id number for English in the languages table
 my_lang = 17
 
@@ -83,10 +83,6 @@ def process_title(title_data):
         # The only shortfiction being processed are Novellas
         if ttype == "SHORTFICTION":
             ttype = "NOVELLA"
-
-
-        # if ttype != 'NOVELLA':
-        #     contents = get_contents(title_id, source_cur)
 
 
         #       PUBLICATION DATA
@@ -210,16 +206,6 @@ def process_title(title_data):
                     """, (title_id, image)
                     )
 
-                # for content_id in content_ids:
-                #     dest_cur.execute("""
-                #         INSERT INTO contents 
-                #         (book_title_id, content_title_id) 
-                #         VALUES (%s, %s);
-                #         """, (title_id, content_id)
-                #     )
-    except psycopg2.errors.UniqueViolation:
-        # Hande isbn duplicates here
-        pass
     except:
         logger.exception("\n{}\t{}\tDestination db error".format(
                     title_data[0], title_data[1]))
@@ -232,6 +218,65 @@ def process_title(title_data):
     with titles_added.get_lock():
         titles_added.value += 1
     return
+
+
+def get_books_for_contents():
+    dest_conn = psycopg2.connect(dest_db_conn_string)
+    try:
+        with dest_conn:
+            with dest_conn.cursor() as dest_cur:
+                dest_cur.execute("""
+                    SELECT title_id, book_type
+                    FROM books
+                    WHERE book_type != 'NOVELLA';
+                    """
+                )
+                volumes = dest_cur.fetchall()
+    except:
+        logger.exception("Destination db error in get_books_for_contents")
+        return False 
+    finally:
+        dest_conn.close()
+    return volumes
+
+def populate_contents_for_volume(volume):
+    title_id, ttype = volume
+    source_conn = mysql.connector.connect(**source_db_params)
+    try:
+        source_cur = source_conn.cursor()
+        contents = get_contents(title_id, ttype, source_cur)
+    except:
+        logger.exception(
+            "\n{}\tSource db error in populate_contents_for_volume" \
+            .format(title_id))
+        return
+    finally:
+        source_conn.close()
+
+    for content in contents:
+        dest_conn = psycopg2.connect(dest_db_conn_string)
+        try:
+            with dest_conn:
+                with dest_conn.cursor() as dest_cur:
+                    dest_cur.execute("""
+                        INSERT INTO contents 
+                        (book_title_id, content_title_id) 
+                        VALUES (%s, %s);
+                        """, (title_id, content)
+                    )
+        except psycopg2.errors.ForeignKeyViolation:
+            # Attempts to insert contents not tracked in the books table
+            # will fail. These can be safely ignored.
+            pass
+
+        except:
+            logger.exception(
+                "\n{}\tDestination db error in populate_contents_for_volume" \
+                .format(title_id))
+        finally:
+                dest_conn.close()
+    return
+
 
 
 if __name__ == '__main__':
@@ -292,8 +337,9 @@ if __name__ == '__main__':
     titles_added = Value('i', 0)
     titles_skipped = Value('i', 0)
     titles_errored = Value('i', 0)
-    semaphore = Value('i', 0)
 
+
+    #       MAIN TITLE PROCESSING LOOP
     print("\nMain title loop...")
     print("Processing {} titles".format(len(titles)))
     print("Start time: {}".format(datetime.now()))
@@ -304,14 +350,37 @@ if __name__ == '__main__':
         print("1%[" + "    ."*10 + "]100%")
         print("  [", end='', flush=True)
 
-
+    # Process titles in parallel
     with Pool(pool_size) as p:
         p.map(process_title, titles)
-
-        
+ 
     if PROGRESS_BAR:
         print("]")
 
+    end = datetime.now()
+    total_time = (end - start)
+    print("\nTitles added: {}".format(titles_added.value))
+    print("Titles skipped: {}".format(titles_skipped.value))
+    print("Titles errored: {}".format(titles_errored.value))
+    print("Total time: {}\n".format(total_time))
+
+
+    #       POPULATE CONTENTS TABLE
+    start = datetime.now()
+    print("Populating contents table...")
+    print("Start time: {}".format(start))
+    volumes = get_books_for_contents()
+
+    # populate books contents in parallel
+    with Pool(pool_size) as p:
+        p.map(populate_contents_for_volume, volumes)
+
+    end = datetime.now()
+    total_time = (end - start)
+    print("Total time: {}\n".format(total_time))
+
+    
+    #       INDEX TABLES AND CONSTRAIN ISBN TABLE
     dest_conn = psycopg2.connect(dest_db_conn_string)
     try:
         with dest_conn:
@@ -323,14 +392,5 @@ if __name__ == '__main__':
         logger.exception(error_str)
     finally:
         dest_conn.close()
-
-
-    end = datetime.now()
-    total_time = (end - start)
-
-    print("\nTitles added: {}".format(titles_added.value))
-    print("Titles skipped: {}".format(titles_skipped.value))
-    print("Titles errored: {}".format(titles_errored.value))
-    print("Total time: {}".format(total_time))
 
     logger.info("Migration script completed")
