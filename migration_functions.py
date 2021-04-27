@@ -65,6 +65,8 @@ def prepare_books_tables(dest_cur):
             isbn        varchar(13) NOT NULL CHECK (isbn <> ''),
             title_id    integer NOT NULL 
                 REFERENCES books (title_id) ON DELETE CASCADE,
+            book_type   ttype NOT NULL,  
+            foreign_lang     boolean default FALSE,
             UNIQUE (isbn, title_id)
         );
 
@@ -238,24 +240,22 @@ def get_pub_fields(title_id, root_id, ttype, source_alch_conn):
         source_alch_conn, params=[root_id, root_id])
 
 
-    en_books = all_pubs[( (all_pubs.pub_ctype == "NOVEL") | 
+    all_books = all_pubs[ (all_pubs.pub_ctype == "NOVEL") | 
                     (all_pubs.pub_ctype == "CHAPBOOK") |
                     (all_pubs.pub_ctype == "ANTHOLOGY") |
                     (all_pubs.pub_ctype == "COLLECTION") |
-                    (all_pubs.pub_ctype == "OMNIBUS") ) &
-                    (all_pubs.title_language == my_lang )]
+                    (all_pubs.pub_ctype == "OMNIBUS") ]
 
-    if en_books.shape[0] == 0:
+    if all_books[ (all_books.title_language == my_lang) ].shape[0] == 0:
         # if not available as book in my_lang, don't include this title
         return False
 
     if ttype == "NOVELLA":
-        en_editions = en_books[ (en_books.pub_ctype == "CHAPBOOK") ]
-        all_editions = all_pubs[ (all_pubs.pub_ctype == "CHAPBOOK") ]
+        all_editions = all_books[ (all_books.pub_ctype == "CHAPBOOK") ]
     else:
-        en_editions = en_books[( (en_books.pub_ctype == ttype) )]
-        all_editions = all_pubs[( (all_pubs.pub_ctype == ttype) )]
+        all_editions = all_books[( (all_books.pub_ctype == ttype) )]
 
+    en_editions = all_editions[ (all_editions.title_language == my_lang ) ]
     editions = en_editions.shape[0]
     if editions:
         stand_alone = True
@@ -272,19 +272,30 @@ def get_pub_fields(title_id, root_id, ttype, source_alch_conn):
 
 
     # map all remaining ISBNs to this title_id in the isbn table
-    all_isbns = all_editions[( (all_editions.pub_isbn.notnull()) & 
-                            (all_editions.pub_isbn != '') )]\
-                            .pub_isbn.drop_duplicates().to_list()
+    all_isbns = all_editions \
+        [( (all_editions.pub_isbn != None)& \
+            (all_editions.pub_isbn != '')  )]
 
-    # # Insert all isbns into the isbn table 
-    # # so we can map from isbn to title_id
-    # for book_isbn in all_book_isbns:
-    #     dest_cur.execute("""
-    #         INSERT INTO isbns 
-    #         (isbn, title_id) 
-    #         VALUES (%s, %s);
-    #         """, (book_isbn, title_id)
-    #     )
+    all_isbns = all_editions \
+        [ all_editions.pub_isbn != '' ] \
+        .dropna(subset=['pub_isbn']) \
+        .loc[:,('pub_isbn', 'pub_ctype', 'title_language')]
+    # change title_langauge to work as the foreign_lang boolean key
+    # in the isbn table 
+    all_isbns['title_language'] = all_isbns['title_language'] \
+        .apply(lambda l: True if l != 17 else False)
+    all_isbns['pub_ctype'] = all_isbns['pub_ctype'] \
+        .apply(lambda t: 'NOVELLA' if t == 'CHAPBOOK' else t)
+    all_isbns = all_isbns \
+        .sort_values(by='title_language') \
+        .drop_duplicates(subset=['pub_isbn'], keep='first') \
+        .to_records(index=False).tolist()
+
+    # all_isbns = all_editions[( (all_editions.pub_isbn.notnull()) & 
+    #                         (all_editions.pub_isbn != '') )] \
+    #                         .pub_isbn.drop_duplicates() \
+    
+
 
     # A key method to pass to sort_values to choose the best source for
     # page number and cover images. Which fields have higher priority, 
@@ -310,9 +321,9 @@ def get_pub_fields(title_id, root_id, ttype, source_alch_conn):
             return pub_column
 
     pages = None
-    all_editions = all_editions.sort_values(
+    en_editions = en_editions.sort_values(
         by=['title_id', 'pub_ptype', 'p_year', 'pub_id'], key=preferred_pubs)
-    for page_str in all_editions.pub_pages:
+    for page_str in en_editions.pub_pages:
         # Might be in a format like: "vii+125+[10]" or "125+[10]"
         # try the second and then the first positions before giving up
         for ii in (1,0):
@@ -331,14 +342,14 @@ def get_pub_fields(title_id, root_id, ttype, source_alch_conn):
     # Don't consider binding type cover image for now
     # TODO: consider removing audio book or ebook covers 
     # if they cause a quality problem
-    all_editions = all_editions.sort_values(
+    en_editions = en_editions.sort_values(
         by=['title_id', 'p_year', 'pub_id'], key=preferred_pubs)
     # only keep external image links if they are from amazon or isfdb
-    preferred_covers = all_editions[(all_editions.pub_frontimage.notnull() ) &
-                            (all_editions.pub_frontimage != '' ) &
-                        ( ('amazon.com' in str(all_editions.pub_frontimage) ) |
-                        ('amazon.ca' in str(all_editions.pub_frontimage) ) |
-                        ('isfdb.org' in str(all_editions.pub_frontimage) ) )]\
+    preferred_covers = en_editions[(en_editions.pub_frontimage.notnull() ) &
+                            (en_editions.pub_frontimage != '' ) &
+                        ( ('amazon.com' in str(en_editions.pub_frontimage) ) |
+                        ('amazon.ca' in str(en_editions.pub_frontimage) ) |
+                        ('isfdb.org' in str(en_editions.pub_frontimage) ) )]\
                         .pub_frontimage.drop_duplicates().to_list()
 
     if preferred_covers:
@@ -346,22 +357,13 @@ def get_pub_fields(title_id, root_id, ttype, source_alch_conn):
         # more_images = [i[0] for i in preferred_covers[1:]]
         more_images = preferred_covers[1:]
 
-
-        # # insert additional covers into their own table
-        # for image in preferred_covers[1:]:
-        #     dest_cur.execute("""
-        #         INSERT INTO more_images 
-        #         (title_id, image) 
-        #         VALUES (%s, %s);
-        #     """, (title_id, image)
-        #     )
     else:
         cover_image = None
         more_images = []
 
-    preferred_isbns = all_editions[((all_editions.pub_isbn.notnull()) &
-                    (all_editions.pub_isbn != '') &
-                    (all_editions.pub_ptype.str.contains('audio') == False))]\
+    preferred_isbns = en_editions[((en_editions.pub_isbn.notnull()) &
+                    (en_editions.pub_isbn != '') &
+                    (en_editions.pub_ptype.str.contains('audio') == False))]\
                     .pub_isbn.to_list()
 
     if preferred_isbns:
@@ -503,7 +505,7 @@ def get_series_strings(series_id, seriesnum, seriesnum_2, source_cur):
     return series_str_1, series_str_2
 
 def get_contents(title_id, ttype, source_cur):
-    # Use the pub_content table to find all novels or novellas in the book
+    # Use the pub_content table to find all titles contained in the book
     source_cur.execute("""
         SELECT DISTINCT t2.title_id
         FROM titles AS t2

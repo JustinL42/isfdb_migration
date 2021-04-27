@@ -15,7 +15,7 @@ import psycopg2
 from migration_functions import *
 
 PROGRESS_BAR = True
-N_PROC = -2
+N_PROC = -1
 LIMIT = 5000
 DEBUG = True
 # The id number for English in the languages table
@@ -45,8 +45,17 @@ def process_title(title_data):
     title_id, title, synopsis_id, note_id, series_id, seriesnum, \
     year, ttype, parent_id, rating, seriesnum_2, title_jvn = title_data
 
+    if year == 8888:
+        # this indicates the title was never published
+        with titles_skipped.get_lock():
+            titles_skipped.value += 1
+        return
+    elif year == 0:
+        year = None
+
     source_conn = mysql.connector.connect(**source_db_params)
     try:
+
         source_cur = source_conn.cursor()
 
 
@@ -68,7 +77,6 @@ def process_title(title_data):
                 with titles_skipped.get_lock():
                     titles_skipped.value += 1
                 return
-                # return False
             
             root_id = parent_id
             original_lang, original_title, \
@@ -134,8 +142,6 @@ def process_title(title_data):
         else:
             note = None
 
-        if year == 0 or year == 8888:
-            year = None
 
         if title_jvn == 'Yes':
             juvenile = True
@@ -178,12 +184,12 @@ def process_title(title_data):
                 )
 
 
-                for book_isbn in all_isbns:
+                for book_isbn, book_ttype, foreign_lang in all_isbns:
                     dest_cur.execute("""
                         INSERT INTO isbns 
-                        (isbn, title_id) 
-                        VALUES (%s, %s);
-                        """, (book_isbn, title_id)
+                        (isbn, title_id, book_type, foreign_lang) 
+                        VALUES (%s, %s, %s, %s);
+                        """, (book_isbn, title_id, book_ttype, foreign_lang)
                     )
 
 
