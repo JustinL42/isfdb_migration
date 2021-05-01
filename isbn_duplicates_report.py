@@ -8,28 +8,29 @@ try:
     with dest_conn:
         with dest_conn.cursor() as dest_cur:
             dest_cur.execute("""
-                select isbn
+                select isbn, count(*) as isbn_count
                 from isbns
                 group by isbn 
-                having count(*) > 1;
+                having count(*) > 1
+                order by count(*) DESC;
                 """
             )
             isbn_groups = dest_cur.fetchall()
 
+            print("Group\tCount\tISBN\tForeign\tType\t" + \
+                "Title ID\tYear\tPages\tAuthors\tTitle\tNote")
             i = 0
-            print("\t".join(['id', 'isbn', 'title_id', 'year', \
-                'pages', 'authors', 'title']))
-            for isbn_group in isbn_groups:
+            for isbn_group, isbn_count in isbn_groups:
                 i +=1
                 dest_cur.execute("""
-                    select i.isbn, b.title_id, 
+                    select i.isbn, i.foreign_lang, i.book_type, b.title_id, 
                         b.year, b.pages, b.authors, b.title, b.note
                     from isbns as i
                     join books as b
                     on b.title_id = i.title_id
                     where i.isbn = %s
                     order by i.isbn;
-                """, (isbn_group[0], )
+                """, (isbn_group, )
                 )
                 results = dest_cur.fetchall()
                 for result in results:
@@ -38,7 +39,7 @@ try:
                         note = note.replace('\n', ' ').replace('\t', ' ')
                     else:
                         note = ''
-                    print(str(i), end='')
+                    print(str(i) + "\t" + str(isbn_count), end='')
                     print("\t" + "\t".join([str(j) for j in result[:-1]]), end='')
                     print("\t" + note, end = '')
                     print("\thttp://www.isfdb.org/cgi-bin/title.cgi?{}".format(result[1]), end='')
