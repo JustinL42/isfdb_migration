@@ -52,7 +52,8 @@ def prepare_books_tables(dest_cur):
             award_winner        boolean default FALSE,
             juvenile            boolean default FALSE,
             stand_alone         boolean default FALSE,
-            ambi_isbn           boolean default FALSE,
+            inconsistent        boolean default FALSE,
+            virtual             boolean default FALSE,
             cover_image         text default NULL CHECK (cover_image <> ''),
             wikipedia           text default NULL CHECK (wikipedia <> ''),
             synopsis            text default NULL,
@@ -290,12 +291,6 @@ def get_pub_fields(title_id, root_id, ttype, source_alch_conn):
         .sort_values(by='title_language') \
         .drop_duplicates(subset=['pub_isbn'], keep='first') \
         .to_records(index=False).tolist()
-
-    # all_isbns = all_editions[( (all_editions.pub_isbn.notnull()) & 
-    #                         (all_editions.pub_isbn != '') )] \
-    #                         .pub_isbn.drop_duplicates() \
-    
-
 
     # A key method to pass to sort_values to choose the best source for
     # page number and cover images. Which fields have higher priority, 

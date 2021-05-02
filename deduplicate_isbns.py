@@ -11,7 +11,7 @@ from sqlalchemy import create_engine
 import psycopg2
 PROGRESS_BAR = False
 N_PROC = -2
-LIMIT = 100
+LIMIT = None
 DEBUG = True
 # The id number for English in the languages table
 my_lang = 17
@@ -32,8 +32,8 @@ def insert_virtual_books(dest_cur):
 
     dest_cur.execute("""
         INSERT INTO books
-        (title_id, title, book_type, note)
-        VALUES(%s, 'Ambiguous ISBN', 'NOVEL', %s)
+        (title_id, title, book_type, virtual, note)
+        VALUES(%s, 'Ambiguous ISBN', 'NOVEL', True, %s)
         ON CONFLICT DO NOTHING;
         """, (AMBI_ISBN_VIRTUAL_TITLE_ID, ambigous_isbn_note))
 
@@ -168,7 +168,7 @@ def winner_takes_all(isbn_claimants, dest_cur):
     #TODO add losers' titles as alternate titles
     dest_cur.execute("""
         UPDATE books
-        SET ambi_isbn = TRUE
+        SET inconsistent = TRUE
         WHERE title_id = %s
         """, (winner_id, )
     )
