@@ -15,8 +15,8 @@ import psycopg2
 from migration_functions import *
 
 PROGRESS_BAR = True
-N_PROC = -1
-LIMIT = 5000
+N_PROC = -2
+LIMIT = None
 DEBUG = True
 # The id number for English in the languages table
 my_lang = 17
@@ -121,16 +121,13 @@ def process_title(title_data):
 
 
         # Unless this is a translation, check for alternate English titles
-        if (original_lang == my_lang):
+        if (original_lang == language_dict[my_lang]):
             alt_titles = get_alternate_titles(title_id, title, source_cur)
         else:
             alt_titles = None
 
-        if series_id:
-            series_str_1, series_str_2 = get_series_strings(
-                series_id, seriesnum, seriesnum_2, source_cur)
-        else:
-            series_str_1 = series_str_2 = None
+        series_str_1, series_str_2 = get_series_strings(
+            series_id, seriesnum, seriesnum_2, parent_id, source_cur)
 
         if synopsis_id:
             synopsis = get_synopsis(synopsis_id, source_cur)

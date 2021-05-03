@@ -377,9 +377,11 @@ def get_alternate_titles(title_id, title, source_cur):
     WHERE title_parent = %s
     AND title_language = %s
     AND title_title != %s
-    AND title_title NOT REGEXP 'part [[:digit:]]+ of [[:digit:]]+|boxed set'
+    AND title_title NOT REGEXP 
+        'part [[:digit:]]+ of |boxed set|abridged|complete novel'
     """, (title_id, my_lang, title))
-    title_set = set([r[0] for r in source_cur.fetchall()]) - set(title)
+    title_set = set([r[0] for r in source_cur.fetchall()]) \
+        - set(title) - set([''])
     
     if not title_set:
         return None
@@ -461,7 +463,25 @@ def get_note(note_id, source_cur):
         """, (note_id,))
     return source_cur.fetchone()[0]
 
-def get_series_strings(series_id, seriesnum, seriesnum_2, source_cur):
+def get_series_strings(
+        series_id, seriesnum, seriesnum_2, parent_id, source_cur):
+
+    if not series_id:
+        if parent_id == 0:
+            return (None, None)
+        else:
+            source_cur.execute("""
+                SELECT series_id, title_seriesnum, title_seriesnum_2
+                FROM titles
+                WHERE title_id = %s
+                """, (parent_id,))
+            series_data = source_cur.fetchone()
+            if not series_data:
+                return (None, None)
+            series_data = series_id, seriesnum, seriesnum_2 
+            return get_series_strings(
+                0, series_id, seriesnum, seriesnum_2, source_cur)
+
     source_cur.execute("""
         SELECT series_title, series_parent
         FROM series
