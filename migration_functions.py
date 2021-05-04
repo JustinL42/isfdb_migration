@@ -10,22 +10,83 @@ excluded_authurs = [4853, 2857, 319407]
 
 def setup_custom_stop_words():
     script_dir = os.path.dirname(os.path.realpath(__file__))
-    custom_file_source = os.path.join(script_dir, 'config', 'custom.stop')
+    custom_file_source = os.path.join(script_dir, 'config', 'isfdb_title.stop')
 
     shardir = subprocess.getoutput("pg_config --sharedir")
-    custom_file_dest = os.path.join(shardir, "custom.stop")
+    custom_file_dest = os.path.join(
+        shardir, "tsearch_data", "isfdb_title.stop")
 
     try:
         shutil.copy(custom_file_source, custom_file_dest)
+        os.chmod(custom_file_dest, 775)
     except PermissionError:
-        print("PermissionError: run as root")
+        print("\nPermissionError when attemping to copy custom stop words file")
+        if os.path.exists(custom_file_dest):
+            print("Custom stop word file exits. Proceeding using " + \
+                "these stop words for the title search index:\n")
+            print(subprocess.getoutput("cat " + str(custom_file_dest)), 
+                end="\n\n")
+        else:
+            print("Permission is needed to copy the stop words file to " + \
+                "PostgreSQL's shardir.\nTry:\n")
+            print('sudo python3 -c "from migration_functions import *; ' + \
+                'setup_custom_stop_words()"')
+            print("\nand then re-run the migration script." + \
+                "Otherwise, turn off CREATE_SEARCH_INDEXES")
+            return False
+    return True
 
 
+def create_custom_text_search_config(language_name, dest_cur):
+    language_name = language_name.lower()
+    dest_cur.execute("""
+        SELECT cfgname 
+        FROM pg_ts_config
+        WHERE cfgname = %s
+        """, (language_name,)
+    )
+    psql_has_snowball_stemmer = dest_cur.fetchone()
+    if psql_has_snowball_stemmer:
+        dest_cur.execute("""
+            CREATE TEXT SEARCH DICTIONARY isfdb_title_dict (
+                TEMPLATE = snowball,
+                Language = %s,
+                STOPWORDS = isfdb_title
+            );
+            """, (language_name, )
+        )
+    else:
+        # postgres doesn't have a stemmer for this language. 
+        # use the 'simple' config to remove custom stop words only
+        language_name = "simple"
+        dest_cur.execute("""
+            CREATE TEXT SEARCH DICTIONARY isfdb_title_dict (
+                TEMPLATE = simple,
+                STOPWORDS = isfdb_title
+            );
+            """
+        )
+
+    dest_cur.execute("""
+        CREATE TEXT SEARCH CONFIGURATION public.isfdb_title_tsc 
+            ( COPY = %s );
+
+        ALTER TEXT SEARCH CONFIGURATION public.isfdb_title_tsc
+            DROP MAPPING FOR email, url, url_path, sfloat, float;
+
+        ALTER TEXT SEARCH CONFIGURATION public.isfdb_title_tsc 
+            ALTER MAPPING FOR asciiword, asciihword, hword_asciipart, 
+            word, hword, hword_part 
+            WITH isfdb_title_dict;
+        """, (language_name, )
+    )
+    return language_name
 
 
 def safe_drop_tables(tables, dest_cur):
-    print("Are you sure you want to drop these tables/types " + \
-        "and permanently lose any data they may contain?\n")
+    print("Are you sure you want to drop any tables, types, or "  + \
+        "configurations with these names and permanently lose any " + \
+        "data they may contain?\n")
     for table in tables:
         print(table)
     print()
@@ -34,10 +95,11 @@ def safe_drop_tables(tables, dest_cur):
         print("Not dropping tables")
         return False
     print("Dropping tables...")
-    for table in tables:
-        dest_cur.execute("DROP table IF EXISTS {};".format(table))
-    for sql_type in tables:
-        dest_cur.execute("DROP type IF EXISTS {};".format(table))
+    for entity_name in [ "TABLE", "TYPE", "TEXT SEARCH CONFIGURATION",
+        "TEXT SEARCH DICTIONARY"]:
+
+        for table in tables:
+            dest_cur.execute("DROP {} IF EXISTS {}".format(entity_name, table))
     return True
 
 
@@ -76,6 +138,7 @@ def prepare_books_tables(dest_cur):
             wikipedia           text default NULL CHECK (wikipedia <> ''),
             synopsis            text default NULL,
             note                text default NULL,
+            general_search      tsvector default NULL,
             PRIMARY KEY (title_id)
         );
 
@@ -122,16 +185,61 @@ def prepare_books_tables(dest_cur):
         """
     )
 
+def populate_search_columns(dest_cur):
+    dest_cur.execute("""
+        CREATE EXTENSION IF NOT EXISTS unaccent;
+        UPDATE books
+        set general_search = (
+            setweight(to_tsvector('isfdb_title_tsc', 
+                unaccent(title)), 'A') || 
+            setweight(to_tsvector('simple', 
+                unaccent(authors)), 'B') ||
+            setweight(to_tsvector('isfdb_title_tsc', 
+                unaccent(coalesce(alt_titles, ' '))), 'C')
+        );
+        CREATE INDEX ON books USING GIN ( general_search );
+
+        CREATE EXTENSION IF NOT EXISTS pg_trgm;
+        CREATE INDEX ON books 
+            USING GIST (title gist_trgm_ops(siglen=256));
+        CREATE INDEX ON books 
+            USING GIST (authors gist_trgm_ops(siglen=256));
+        CREATE INDEX ON books 
+            USING GIST (alt_titles gist_trgm_ops(siglen=256));
+
+        CREATE TABLE words AS 
+            SELECT word 
+            FROM ts_stat(
+                'SELECT 
+                    to_tsvector(''simple'', title) ||
+                    to_tsvector(''simple'', authors) ||
+                    to_tsvector(''simple'', coalesce(alt_titles, '' '')) 
+                FROM books'
+            );
+
+        CREATE INDEX ON words USING GIST (word gist_trgm_ops(siglen=256));
+
+        """
+    )
+
 
 def index_book_tables(dest_cur):
-    print("Index tables...")
     dest_cur.execute("""
+        CREATE INDEX ON books(title);
+        CREATE INDEX ON books(year);
+        CREATE INDEX ON books(authors);
         CREATE INDEX ON books(book_type);
-        CREATE INDEX ON books(isbn);
+        CREATE INDEX ON books(book_type);
+        CREATE INDEX ON books(book_type);
         CREATE INDEX ON books(original_lang);
         CREATE INDEX ON books(isfdb_rating);
         CREATE INDEX ON books(award_winner);
         CREATE INDEX ON books(juvenile);
+        CREATE INDEX ON books(stand_alone);
+        CREATE INDEX ON books(virtual);
+
+        CREATE INDEX ON isbns(isbn);
+        CREATE INDEX ON isbns(title_id);
 
         CREATE INDEX ON translations(newest_title_id);
 
@@ -141,6 +249,8 @@ def index_book_tables(dest_cur):
         CREATE INDEX ON more_images(title_id);
         """
     )
+
+
 
 
 def get_language_dict(source_cur):

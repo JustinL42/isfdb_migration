@@ -16,7 +16,7 @@ from migration_functions import *
 
 PROGRESS_BAR = True
 N_PROC = -2
-LIMIT = None
+LIMIT = 5000
 DEBUG = True
 CREATE_SEARCH_INDEXES = True
 # The id number for English in the languages table
@@ -30,7 +30,7 @@ source_db_params = dict(
 )
 
 dest_db_name = "rec_system"
-dest_db_conn_string = "dbname={} user=postgres".format(dest_db_name)
+dest_db_conn_string = "port=5434 dbname={} user=postgres".format(dest_db_name)
 
 source_db_alchemy_conn_string ='mysql+pymysql://root:@127.0.0.1/isfdb'
 
@@ -294,11 +294,15 @@ if __name__ == '__main__':
     logger = logging.getLogger(__name__)
     logger.info("{}\tStarting Logging".format(str(start)))
 
-    if CREATE_SEARCH_INDEXES:
-        setup_custom_stop_words()
 
     # TODO: make this configurable script parameter
     my_lang = ENGLISH
+    source_conn = mysql.connector.connect(**source_db_params)
+    try:
+        source_cur = source_conn.cursor()
+        language_dict = get_language_dict(source_cur)
+    finally:
+        source_conn.close()
 
     # Try to delete and the table (with user interaction) 
     # and create them again from scratch
@@ -307,21 +311,37 @@ if __name__ == '__main__':
     try:
         with dest_conn:
             with dest_conn.cursor() as dest_cur:
+                if CREATE_SEARCH_INDEXES:
+                    success = setup_custom_stop_words()
+                    if not success:
+                        sys.exit(1)
                 success = safe_drop_tables(['isbns', 'contents', 
-                    'translations', 'more_images', 'books', 'ttype'], dest_cur)
+                    'translations', 'more_images', 'books', 'words', 'ttype', 
+                    'isfdb_title_tsc', 'isfdb_title_dict' ], dest_cur)
                 if not success:
                     sys.exit(1)
+                if CREATE_SEARCH_INDEXES: 
+                    language_used = \
+                        create_custom_text_search_config(
+                            language_dict[my_lang], dest_cur)
+                    if language_used == 'simple':
+                        warning_str = "The specified language isn't " + \
+                            "doesn't have a snowball stemmer. " + \
+                            "Using simple configuration instead. " + \
+                            "Stemming isn't available for title search vectors"
+                        print(warning_str)
+                        logger.warning(warning_str)
+
                 prepare_books_tables(dest_cur)
     except:
-        print("Problem deleting or creating the tables.")
+        print("Problem with stop word file, " + \
+            " or with deleting or creating the tables.")
         print("Exiting migration script.")
         sys.exit(1)
     finally:
         dest_conn.close()
-        print("Closed connection")
 
-    # Get dictionary of language codes and all the titles specified by 
-    # the query in get_all_titles.
+
     source_conn = mysql.connector.connect(**source_db_params)
     try:
         source_cur = source_conn.cursor()
@@ -391,6 +411,14 @@ if __name__ == '__main__':
     try:
         with dest_conn:
             with dest_conn.cursor() as dest_cur:
+                if CREATE_SEARCH_INDEXES:
+                    start = datetime.now()
+                    print("Populating search vector columns...")
+                    populate_search_columns(dest_cur)
+                    end = datetime.now()
+                    total_time = (end - start)
+                    print("Total time: {}\n".format(total_time))
+                print("Creating Indexes...")
                 index_book_tables(dest_cur)
     except:
         error_str = "Problem indexing or constraining the tables."
