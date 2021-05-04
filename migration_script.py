@@ -18,8 +18,9 @@ PROGRESS_BAR = True
 N_PROC = -2
 LIMIT = None
 DEBUG = True
+CREATE_SEARCH_INDEXES = True
 # The id number for English in the languages table
-my_lang = 17
+ENGLISH = 17
 
 source_db_params = dict(
     host="localhost",
@@ -293,9 +294,11 @@ if __name__ == '__main__':
     logger = logging.getLogger(__name__)
     logger.info("{}\tStarting Logging".format(str(start)))
 
-    # The code for English in the languages table
+    if CREATE_SEARCH_INDEXES:
+        setup_custom_stop_words()
+
     # TODO: make this configurable script parameter
-    my_lang = 17
+    my_lang = ENGLISH
 
     # Try to delete and the table (with user interaction) 
     # and create them again from scratch

@@ -1,9 +1,27 @@
 import pandas as pd
+import os
+import subprocess
+import shutil
 
 # Code from languages table
 # Default is 17 for English
 my_lang = 17
 excluded_authurs = [4853, 2857, 319407]
+
+def setup_custom_stop_words():
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+    custom_file_source = os.path.join(script_dir, 'config', 'custom.stop')
+
+    shardir = subprocess.getoutput("pg_config --sharedir")
+    custom_file_dest = os.path.join(shardir, "custom.stop")
+
+    try:
+        shutil.copy(custom_file_source, custom_file_dest)
+    except PermissionError:
+        print("PermissionError: run as root")
+
+
+
 
 def safe_drop_tables(tables, dest_cur):
     print("Are you sure you want to drop these tables/types " + \
