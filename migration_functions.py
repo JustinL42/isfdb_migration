@@ -2,11 +2,16 @@ import pandas as pd
 import os
 import subprocess
 import shutil
+from html import unescape
 
 # Code from languages table
 # Default is 17 for English
 my_lang = 17
 excluded_authurs = [4853, 2857, 319407]
+# This title_id originally belonged to a title that was deleted in the 
+# isfdb and is a convenient place holder to represent isbns that have 
+# been deleted due to being re-used for completely different books. 
+AMBI_ISBN_VIRTUAL_TITLE_ID = 73
 
 def setup_custom_stop_words():
     script_dir = os.path.dirname(os.path.realpath(__file__))
@@ -95,23 +100,27 @@ def safe_drop_tables(tables, dest_cur):
         print("Not dropping tables")
         return False
     print("Dropping tables...")
-    for entity_name in [ "TABLE", "TYPE", "TEXT SEARCH CONFIGURATION",
-        "TEXT SEARCH DICTIONARY"]:
+    for entity_name in [ "TABLE", "TEXT SEARCH CONFIGURATION",
+        "TEXT SEARCH DICTIONARY",  "TYPE"]:
 
         for table in tables:
             dest_cur.execute("DROP {} IF EXISTS {}".format(entity_name, table))
     return True
 
 
+def create_ttype_enum(dest_cur):
+    dest_cur.execute("""
+        CREATE TYPE ttype as ENUM (
+            'NOVEL', 'NOVELLA', 'ANTHOLOGY', 'COLLECTION', 'OMNIBUS'
+        );
+        """
+    ) 
+
+
 def prepare_books_tables(dest_cur):
 
     print("Creating tables...")
     dest_cur.execute("""
-
-        CREATE TYPE ttype as ENUM (
-            'NOVEL', 'NOVELLA', 'ANTHOLOGY', 'COLLECTION', 'OMNIBUS'
-        );
-
 
         CREATE TABLE books (
             title_id            integer NOT NULL,
@@ -217,7 +226,10 @@ def populate_search_columns(dest_cur):
                 FROM books'
             );
 
-        CREATE INDEX ON words USING GIST (word gist_trgm_ops(siglen=256));
+        CREATE INDEX ON words 
+            USING GIST (word gist_trgm_ops(siglen=1024));
+        CREATE INDEX ON words 
+            USING hash (word);
 
         """
     )
@@ -229,8 +241,6 @@ def index_book_tables(dest_cur):
         CREATE INDEX ON books(year);
         CREATE INDEX ON books(authors);
         CREATE INDEX ON books(book_type);
-        CREATE INDEX ON books(book_type);
-        CREATE INDEX ON books(book_type);
         CREATE INDEX ON books(original_lang);
         CREATE INDEX ON books(isfdb_rating);
         CREATE INDEX ON books(award_winner);
@@ -238,15 +248,15 @@ def index_book_tables(dest_cur):
         CREATE INDEX ON books(stand_alone);
         CREATE INDEX ON books(virtual);
 
-        CREATE INDEX ON isbns(isbn);
-        CREATE INDEX ON isbns(title_id);
+        CREATE INDEX ON isbns using hash (isbn);
+        CREATE INDEX ON isbns using hash (title_id);
 
-        CREATE INDEX ON translations(newest_title_id);
+        CREATE INDEX ON translations using hash (newest_title_id);
 
-        CREATE INDEX ON contents(book_title_id);
-        CREATE INDEX ON contents(content_title_id);
+        CREATE INDEX ON contents using hash (book_title_id);
+        CREATE INDEX ON contents using hash (content_title_id);
 
-        CREATE INDEX ON more_images(title_id);
+        CREATE INDEX ON more_images using hash (title_id);
         """
     )
 
@@ -348,10 +358,11 @@ def get_original_fields(title_id, parent_id, source_cur, language_dict):
         else:
             note = None
 
-        translations.append( (tr[0], tr[1], tr_year, note) )
+        translations.append( (tr[0], unescape(tr[1]), tr_year, note) )
 
 
-    return original_lang, original_title, original_year, translations
+    return \
+        original_lang, unescape(original_title), original_year, translations
 
 
 def get_pub_fields(title_id, root_id, ttype, source_alch_conn):
@@ -514,7 +525,7 @@ def get_alternate_titles(title_id, title, source_cur):
     if not title_set:
         return None
     else:
-        alt_titles = "; ".join([title for title in title_set])
+        alt_titles = unescape("; ".join([title for title in title_set]))
 
     # if alt_titles is too long, it is probably an 
     # injudicious application of alternate titles and shouldn't be used
@@ -537,7 +548,7 @@ def get_authors(title_id, source_cur):
     if not authors_results:
         return None
     authors_list = [a for result in authors_results for a in result]
-    return", ".join(authors_list)
+    return unescape(", ".join(authors_list))
 
 
 def get_wikipedia_link(title_id, source_cur):
@@ -579,7 +590,7 @@ def get_synopsis(synopsis_id, source_cur):
         WHERE note_id = %s
         LIMIT 1;
         """, (synopsis_id,))
-    return source_cur.fetchone()[0]
+    return unescape(source_cur.fetchone()[0])
 
 
 def get_note(note_id, source_cur):
@@ -589,7 +600,7 @@ def get_note(note_id, source_cur):
         WHERE note_id = %s
         LIMIT 1;
         """, (note_id,))
-    return source_cur.fetchone()[0]
+    return unescape(source_cur.fetchone()[0])
 
 def get_series_strings(
         series_id, seriesnum, seriesnum_2, parent_id, source_cur):
@@ -636,7 +647,7 @@ def get_series_strings(
     series_str_1 += (" of the " + series_title + " series.")
 
     if len(parent_series) == 0:
-        return series_str_1, None
+        return unescape(series_str_1), None
 
     if len(parent_series) == 1:
         series_str_2 = " Also part of the " + parent_series[0] + " series."
@@ -645,7 +656,7 @@ def get_series_strings(
         for series_title in parent_series[:-1]:
             series_str_2 += (series_title + ", ")
         series_str_2 += ("and " + parent_series[-1] + " series.")
-    return series_str_1, series_str_2
+    return unescape(series_str_1), unescape(series_str_2)
 
 def get_contents(title_id, ttype, source_cur):
     # Use the pub_content table to find all titles contained in the book
@@ -681,3 +692,22 @@ def get_contents(title_id, ttype, source_cur):
         """, (title_id, title_id, my_lang, ttype, title_id)
     )
     return source_cur.fetchall()
+
+
+def constrain_vacuum_analyze(dest_cur):
+    dest_cur.execute("""
+        ALTER TABLE isbns 
+        ADD CONSTRAINT injective_isbn_to_title_id UNIQUE (isbn);
+        """
+    )
+
+    dest_cur.execute("""
+        -- VACUUM FULL;
+        VACUUM;
+        """
+    )
+
+    dest_cur.execute("""
+        ANALYZE;
+        """
+    )

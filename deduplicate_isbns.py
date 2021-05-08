@@ -21,7 +21,7 @@ dest_db_conn_string = "dbname={} user=postgres".format(dest_db_name)
 # This title_id originally belonged to a title that was deleted in the 
 # isfdb and is a convenient place holder to represent isbns that have 
 # been deleted due to being re-used for completely different books. 
-AMBI_ISBN_VIRTUAL_TITLE_ID = 73
+INCONSISTENT_ISBN_VIRTUAL_TITLE = 73
 
 
 def insert_virtual_books(dest_cur):
@@ -35,7 +35,7 @@ def insert_virtual_books(dest_cur):
         (title_id, title, book_type, virtual, note)
         VALUES(%s, 'Ambiguous ISBN', 'NOVEL', True, %s)
         ON CONFLICT DO NOTHING;
-        """, (AMBI_ISBN_VIRTUAL_TITLE_ID, ambigous_isbn_note))
+        """, (INCONSISTENT_ISBN_VIRTUAL_TITLE, ambigous_isbn_note))
 
 def delete_isbn(isbn, dest_cur):
 
@@ -43,7 +43,7 @@ def delete_isbn(isbn, dest_cur):
         INSERT INTO isbns
         (isbn, title_id, book_type)
         VALUES(%s, %s, 'NOVEL');
-        """, (isbn, AMBI_ISBN_VIRTUAL_TITLE_ID)
+        """, (isbn, INCONSISTENT_ISBN_VIRTUAL_TITLE)
     )
 
     dest_cur.execute("""
@@ -51,7 +51,7 @@ def delete_isbn(isbn, dest_cur):
         FROM isbns
         WHERE title_id != %s
         AND isbn = %s;
-        """, (AMBI_ISBN_VIRTUAL_TITLE_ID, isbn)
+        """, (INCONSISTENT_ISBN_VIRTUAL_TITLE, isbn)
     )
 
     dest_cur.execute("""
@@ -176,13 +176,17 @@ def winner_takes_all(isbn_claimants, dest_cur):
 
 def simplify_title(title):
     title = title.lower()
-    for stop_word in [' a ', ' an ', ' the ']:
+
+    # remove internal stopwords
+    for stop_word in [' a ', ' an ', ' by', ' of ', ' the ', ' to ']:
         title = title.replace(stop_word, ' ')
 
-    for stop_word in ['a', 'an', 'the']:        
+    # remove initial stop words
+    for stop_word in ['a', 'an', 'by', 'of', 'the', 'to']:        
         title = title[len(stop_word):] if title.startswith(stop_word) \
             else title
 
+    # delete spaces and most common puncutation
     for char in ' ,.;\'"()|\\?![]':
         title = title.replace(char, '')
 
@@ -351,7 +355,7 @@ if __name__ == '__main__':
 
 
     #       MAIN TITLE PROCESSING LOOP
-    print("\nMain isbn loop...")
+    print("\nMain isbn deduplication loop...")
     print("Processing {} isbns".format(len(duplicate_isbns)))
     print("Start time: {}".format(datetime.now()))
     if PROGRESS_BAR:
