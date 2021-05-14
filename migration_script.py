@@ -83,7 +83,7 @@ def process_title(title_data):
             
             root_id = parent_id
             original_lang, original_title, \
-                original_year, translations = original_fields
+                original_year, translations, lowest_title_id = original_fields
         else:
             root_id = title_id
             original_lang = "English"
@@ -148,6 +148,15 @@ def process_title(title_data):
         else:
             juvenile = False
 
+        # For translated works, use data from the most recent 
+        # translation, but use the lowest title_id of all the 
+        # translations. This improves the stability of the title_id in 
+        # the destination database, since it won't change if a new 
+        # translation is added to the isfdb in the future, but the data 
+        # will be updated to reflect the newer translation.
+        if original_lang != 'English':
+            title_id = lowest_title_id
+
     except:
         logger.exception("\n{}\t{}\tSource db error".format(
                     title_data[0], title_data[1]))
@@ -198,7 +207,7 @@ def process_title(title_data):
 
                     dest_cur.execute("""
                         INSERT INTO translations 
-                        (title_id, newest_title_id, title, year, note) 
+                        (title_id, lowest_title_id, title, year, note) 
                         VALUES (%s, %s, %s, %s, %s);
                         """, (translation_id, title_id, 
                             translation_title, tr_year, note) )

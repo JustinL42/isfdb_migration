@@ -107,8 +107,8 @@ def winner_takes_all(isbn_claimants, dest_cur):
         dest_cur.execute(
             """
             UPDATE translations
-            SET newest_title_id = %s
-            WHERE newest_title_id = %s;
+            SET lowest_title_id = %s
+            WHERE lowest_title_id = %s;
             """, (winner_id, claimant_id)
         )
 

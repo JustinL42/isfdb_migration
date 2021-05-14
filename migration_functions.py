@@ -163,13 +163,13 @@ def prepare_books_tables(dest_cur):
 
         CREATE TABLE translations (
             title_id            integer NOT NULL,
-            newest_title_id     integer NOT NULL 
+            lowest_title_id     integer NOT NULL 
                 REFERENCES books (title_id) ON DELETE CASCADE,
             title               text NOT NULL CHECK (title <> ''),
             year                integer default NULL,
             note                text default NULL,
             PRIMARY KEY (title_id),
-            UNIQUE (title_id, newest_title_id)
+            UNIQUE (title_id, lowest_title_id)
 
         );
 
@@ -201,7 +201,7 @@ def populate_search_columns(dest_cur):
         set general_search = (
             setweight(to_tsvector('isfdb_title_tsc', 
                 unaccent(title)), 'A') || 
-            setweight(to_tsvector('simple', 
+            setweight(to_tsvector('isfdb_title_tsc', 
                 unaccent(authors)), 'B') ||
             setweight(to_tsvector('isfdb_title_tsc', 
                 unaccent(coalesce(alt_titles, ' '))), 'C')
@@ -251,7 +251,7 @@ def index_book_tables(dest_cur):
         CREATE INDEX ON isbns using hash (isbn);
         CREATE INDEX ON isbns using hash (title_id);
 
-        CREATE INDEX ON translations using hash (newest_title_id);
+        CREATE INDEX ON translations using hash (lowest_title_id);
 
         CREATE INDEX ON contents using hash (book_title_id);
         CREATE INDEX ON contents using hash (content_title_id);
@@ -360,9 +360,10 @@ def get_original_fields(title_id, parent_id, source_cur, language_dict):
 
         translations.append( (tr[0], unescape(tr[1]), tr_year, note) )
 
+    lowest_title_id = min([tr[0] for tr in translations])
 
-    return \
-        original_lang, unescape(original_title), original_year, translations
+    return original_lang, unescape(original_title), original_year, \
+        translations, lowest_title_id
 
 
 def get_pub_fields(title_id, root_id, ttype, source_alch_conn):
