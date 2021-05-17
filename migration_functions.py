@@ -708,7 +708,9 @@ def constrain_vacuum_analyze(dest_cur):
         """
     )
 
-    dest_cur.execute("""
-        ANALYZE;
-        """
-    )
+    # Analysis isn't preserved after moving the database
+    # Do this on destination app instead
+    # dest_cur.execute("""
+    #     ANALYZE;
+    #     """
+    # )

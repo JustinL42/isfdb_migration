@@ -17,7 +17,7 @@ from migration_functions import *
 from isbn_deduplication_functions import *
 
 PROGRESS_BAR = True
-N_PROC = -1
+N_PROC = -3
 LIMIT = None
 DEBUG = True
 CREATE_SEARCH_INDEXES = True
@@ -31,7 +31,7 @@ source_db_params = dict(
     database="isfdb"
 )
 
-dest_db_name = "recsyslive"
+dest_db_name = "recsysetl"
 dest_db_conn_string = "port=5434 dbname={} user=postgres".format(dest_db_name)
 
 source_db_alchemy_conn_string ='mysql+pymysql://root:@127.0.0.1/isfdb'
