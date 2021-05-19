@@ -3,6 +3,7 @@ import os
 import subprocess
 import shutil
 from html import unescape
+import re
 
 # Code from languages table
 # Default is 17 for English
@@ -194,6 +195,7 @@ def prepare_books_tables(dest_cur):
         """
     )
 
+
 def populate_search_columns(dest_cur):
     dest_cur.execute("""
         CREATE EXTENSION IF NOT EXISTS unaccent;
@@ -204,7 +206,11 @@ def populate_search_columns(dest_cur):
             setweight(to_tsvector('isfdb_title_tsc', 
                 unaccent(authors)), 'B') ||
             setweight(to_tsvector('isfdb_title_tsc', 
-                unaccent(coalesce(alt_titles, ' '))), 'C')
+                unaccent(coalesce(alt_titles, ' '))), 'C') ||
+            setweight(to_tsvector(
+                'isfdb_title_tsc', 
+                unaccent(substring(series_str_1 from 'the (.*) series.'))
+                ), 'D')
         );
         CREATE INDEX ON books USING GIN ( general_search );
 
@@ -442,9 +448,9 @@ def get_pub_fields(title_id, root_id, ttype, source_alch_conn):
             favor_title_id = lambda id : 1 if id == title_id else 2
             return pub_column.map(favor_title_id)
         elif pub_column.name == 'pub_ptype':
-            #Favor hardcovers, then trade paperback, then paperback, 
+            #Favor trade paperback, then hardcovers, then paperback, 
             # then ebook, then anything else. 
-            favor_hard_cover = lambda ptype : { 'hc' : 1, 'tp' : 2, 
+            favor_hard_cover = lambda ptype : { 'tp' : 1, 'hc' : 2, 
                 'pb' : 3, 'ebook' : 4}.get(ptype, 5)
             return pub_column.map(favor_hard_cover)
         elif pub_column.name == 'p_year' or pub_column.name == 'pub_id':
@@ -465,11 +471,7 @@ def get_pub_fields(title_id, root_id, ttype, source_alch_conn):
             try:
                 pages = int(page_str.split("+")[ii])
                 break
-            except AttributeError:
-                pass
-            except IndexError:
-                pass
-            except ValueError:
+            except (AttributeError, IndexError, ValueError):
                 pass
         if pages:
             break
@@ -488,6 +490,10 @@ def get_pub_fields(title_id, root_id, ttype, source_alch_conn):
                         .pub_frontimage.drop_duplicates().to_list()
 
     if preferred_covers:
+        preferred_covers = [
+            "https" + i_url[4:] if i_url[:5].lower() == 'http:' \
+            else i_url for i_url in preferred_covers
+        ]
         cover_image = preferred_covers[0]
         # more_images = [i[0] for i in preferred_covers[1:]]
         more_images = preferred_covers[1:]
@@ -564,7 +570,10 @@ def get_wikipedia_link(title_id, source_cur):
     # we can't guess which is the general link
     if len(wiki_links) != 1:
         return None
-    return wiki_links[0][0]
+    wiki_link = wiki_links[0][0]
+    if wiki_link[:5].lower() == 'http:':
+        wiki_link = 'https' + wiki_link[4:]
+    return wiki_link
 
 
 def get_award_winner(title_id, source_cur):
@@ -594,6 +603,19 @@ def get_synopsis(synopsis_id, source_cur):
     return unescape(source_cur.fetchone()[0])
 
 
+note_regex_subs = [
+        (re.compile( r"{{Tr\|(.*?)}}" ), r"Translated by \1" ),
+        (re.compile( r"{{tr\|(.*?)}}" ), r"translated by \1" ),
+        (re.compile( r"{{Narrator\|(.*?)}}" ), r"Narrated by \1" ),
+        (re.compile( r"{{narrator\|(.*?)}}" ), r"narrated by \1" ),
+        (re.compile( r"{{Incomplete}}", re.IGNORECASE ), 
+            r"The Contents section of this record is incomplete; " + \
+            r"additional eligible titles still need to be added." ),
+        (re.compile( r"{{(.*?)|(.*?)}}" ), r"\2"),
+        (re.compile( r"{{(.*?)}}" ), r" "),
+        (re.compile( r"(.*?)http:(.*?)", re.IGNORECASE ), r"\1https:\2" )
+    ]
+
 def get_note(note_id, source_cur):
     source_cur.execute("""
         SELECT note_note
@@ -601,7 +623,10 @@ def get_note(note_id, source_cur):
         WHERE note_id = %s
         LIMIT 1;
         """, (note_id,))
-    return unescape(source_cur.fetchone()[0])
+    note = unescape(source_cur.fetchone()[0])
+    for regex, replacement in note_regex_subs:
+        note = regex.sub(replacement, note)
+    return note
 
 def get_series_strings(
         series_id, seriesnum, seriesnum_2, parent_id, source_cur):

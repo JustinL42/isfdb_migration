@@ -17,8 +17,8 @@ from migration_functions import *
 from isbn_deduplication_functions import *
 
 PROGRESS_BAR = True
-N_PROC = -3
-LIMIT = None
+N_PROC = -2
+LIMIT = 5000
 DEBUG = True
 CREATE_SEARCH_INDEXES = True
 # The id number for English in the languages table
