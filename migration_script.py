@@ -18,7 +18,7 @@ from isbn_deduplication_functions import *
 
 PROGRESS_BAR = True
 N_PROC = -2
-LIMIT = 5000
+LIMIT = None
 DEBUG = True
 CREATE_SEARCH_INDEXES = True
 # The id number for English in the languages table

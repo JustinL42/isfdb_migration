@@ -204,13 +204,15 @@ def populate_search_columns(dest_cur):
             setweight(to_tsvector('isfdb_title_tsc', 
                 unaccent(title)), 'A') || 
             setweight(to_tsvector('isfdb_title_tsc', 
-                unaccent(authors)), 'B') ||
+                unaccent(coalesce(authors, ' '))), 'B') ||
             setweight(to_tsvector('isfdb_title_tsc', 
                 unaccent(coalesce(alt_titles, ' '))), 'C') ||
             setweight(to_tsvector(
                 'isfdb_title_tsc', 
-                unaccent(substring(series_str_1 from 'the (.*) series.'))
-                ), 'D')
+                unaccent(coalesce(
+                    substring(series_str_1 from 'the (.*) series.'), ' '
+                ) )
+            ), 'D')
         );
         CREATE INDEX ON books USING GIN ( general_search );
 
@@ -227,8 +229,11 @@ def populate_search_columns(dest_cur):
             FROM ts_stat(
                 'SELECT 
                     to_tsvector(''simple'', title) ||
-                    to_tsvector(''simple'', authors) ||
-                    to_tsvector(''simple'', coalesce(alt_titles, '' '')) 
+                    to_tsvector(''simple'', coalesce(authors, '' '')) ||
+                    to_tsvector(''simple'', coalesce(alt_titles, '' '')) ||
+                    to_tsvector(''simple'', coalesce(
+                        substring(series_str_1 from ''the (.*) series.''), '' ''
+                    ))
                 FROM books'
             );
 
@@ -445,14 +450,14 @@ def get_pub_fields(title_id, root_id, ttype, source_alch_conn):
         if pub_column.name == 'title_id':
             # Favor the curent title_id above all else, which is either 
             #the parent title or the most recent my_lang translation
-            favor_title_id = lambda id : 1 if id == title_id else 2
+            favor_title_id = lambda t_id : 1 if t_id == title_id else 2
             return pub_column.map(favor_title_id)
         elif pub_column.name == 'pub_ptype':
             #Favor trade paperback, then hardcovers, then paperback, 
             # then ebook, then anything else. 
-            favor_hard_cover = lambda ptype : { 'tp' : 1, 'hc' : 2, 
+            favor_trade_paperback = lambda ptype : { 'tp' : 1, 'hc' : 2, 
                 'pb' : 3, 'ebook' : 4}.get(ptype, 5)
-            return pub_column.map(favor_hard_cover)
+            return pub_column.map(favor_trade_paperback)
         elif pub_column.name == 'p_year' or pub_column.name == 'pub_id':
             # Favor newer publications.
             # Make it negative to affect a descending sort on year or id
@@ -476,26 +481,30 @@ def get_pub_fields(title_id, root_id, ttype, source_alch_conn):
         if pages:
             break
 
-    # Don't consider binding type cover image for now
-    # TODO: consider removing audio book or ebook covers 
-    # if they cause a quality problem
     en_editions = en_editions.sort_values(
-        by=['title_id', 'p_year', 'pub_id'], key=preferred_pubs)
+        by=['title_id', 'pub_ptype', 'p_year', 'pub_id'], key=preferred_pubs)
     # only keep external image links if they are from amazon or isfdb
-    preferred_covers = en_editions[(en_editions.pub_frontimage.notnull() ) &
-                            (en_editions.pub_frontimage != '' ) &
-                        ( ('amazon.com' in str(en_editions.pub_frontimage) ) |
-                        ('amazon.ca' in str(en_editions.pub_frontimage) ) |
-                        ('isfdb.org' in str(en_editions.pub_frontimage) ) )]\
-                        .pub_frontimage.drop_duplicates().to_list()
+    preferred_covers = en_editions[ (
+        (en_editions.pub_frontimage.notnull() ) &
+        (en_editions.pub_frontimage != '' ) & (
+            ( en_editions.pub_frontimage.str.contains('amazon.com') ) |
+            ( en_editions.pub_frontimage.str.contains('amazon.ca') ) |
+            ( en_editions.pub_frontimage.str.contains('isfdb.org') ) 
+        )
+    ) ].pub_frontimage.drop_duplicates().to_list()
 
     if preferred_covers:
         preferred_covers = [
-            "https" + i_url[4:] if i_url[:5].lower() == 'http:' \
+            "https://images-na.ssl-images-amazon.com" + i_url[28:] \
+            if i_url[:28].lower() == 'http://ecx.images-amazon.com' \
+            else i_url for i_url in preferred_covers
+        ]
+        preferred_covers = [
+            "https" + i_url[4:] \
+            if i_url[:5].lower() == 'http:' \
             else i_url for i_url in preferred_covers
         ]
         cover_image = preferred_covers[0]
-        # more_images = [i[0] for i in preferred_covers[1:]]
         more_images = preferred_covers[1:]
 
     else:
