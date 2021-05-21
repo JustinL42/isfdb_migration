@@ -494,22 +494,26 @@ def get_pub_fields(title_id, root_id, ttype, source_alch_conn):
     ) ].pub_frontimage.drop_duplicates().to_list()
 
     if preferred_covers:
-        # change the non-https ecx domain to the equivelent https amazon domain
-        preferred_covers = [
-            "https://images-na.ssl-images-amazon.com" + i_url[28:] \
-            if i_url[:28].lower() == 'http://ecx.images-amazon.com' \
-            else i_url for i_url in preferred_covers
-        ]
-        preferred_covers = [
-            "https://images-na.ssl-images-amazon.com" + i_url[24:] \
-            if i_url[:24].lower() == 'http://images.amazon.com' \
-            else i_url for i_url in preferred_covers
-        ]
-        preferred_covers = [
-            "https" + i_url[4:] \
-            if i_url[:5].lower() == 'http:' \
-            else i_url for i_url in preferred_covers
-        ]
+        # change non-ssl amazon domains to the ssl amazon domain
+        for ii in range(len(preferred_covers)):
+            protocol, _, domain, remainder = preferred_covers[ii].split('/', 3)
+            try:
+                if domain.split('.')[-2] == 'images-amazon':
+                    preferred_covers[ii] = \
+                        "https://images-na.ssl-images-amazon.com/" + remainder
+                    continue
+            except IndexError:
+                pass
+            if domain in ['images.amazon.com', 
+                'images-eu.amazon.com', 'img.amazon.ca']:
+
+                preferred_covers[ii] = \
+                    "https://images-na.ssl-images-amazon.com/" + remainder
+                continue
+
+            if protocol.lower() == 'http:':
+                preferred_covers[ii] = 'https' + preferred_covers[ii][4:]
+
         cover_image = preferred_covers[0]
         more_images = preferred_covers[1:]
 
