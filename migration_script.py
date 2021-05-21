@@ -217,7 +217,10 @@ def process_title(title_data):
                     dest_cur.execute("""
                         INSERT INTO more_images 
                         (title_id, image) 
-                        VALUES (%s, %s);
+                        VALUES (%s, %s)
+                        ON CONFLICT 
+                        ON CONSTRAINT more_images_title_id_image_key 
+                        DO NOTHING;
                     """, (title_id, image)
                     )
 

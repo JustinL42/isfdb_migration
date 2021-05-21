@@ -494,9 +494,15 @@ def get_pub_fields(title_id, root_id, ttype, source_alch_conn):
     ) ].pub_frontimage.drop_duplicates().to_list()
 
     if preferred_covers:
+        # change the non-https ecx domain to the equivelent https amazon domain
         preferred_covers = [
             "https://images-na.ssl-images-amazon.com" + i_url[28:] \
             if i_url[:28].lower() == 'http://ecx.images-amazon.com' \
+            else i_url for i_url in preferred_covers
+        ]
+        preferred_covers = [
+            "https://images-na.ssl-images-amazon.com" + i_url[24:] \
+            if i_url[:24].lower() == 'http://images.amazon.com' \
             else i_url for i_url in preferred_covers
         ]
         preferred_covers = [
