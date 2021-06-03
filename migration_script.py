@@ -296,6 +296,61 @@ def populate_contents_for_volume(volume):
     return
 
 
+def create_isbn_10_and_13(isbn_tuple):
+    try:
+        isbn, title_id, book_type, foreign_lang = isbn_tuple
+
+        if PROGRESS_BAR:
+            with i.get_lock():
+                i.value += 1
+                if i.value % two_percent_increment == 0:
+                    print("#", end='', flush=True)
+
+        if len(isbn) == 13:
+            if isbn[:3] != '978':
+                # newer isbn 13s don't have an isbn 10 equivilent
+                new_isbn = None
+            else:
+                new_isbn = isbn13_to_10(isbn)
+                if len(new_isbn) != 10:
+                    raise Exception(
+                        "Invalid ISBN conversion for: {}".format(isbn))
+        elif len(isbn) == 10:
+            new_isbn = isbn10_to_13(isbn)
+            if len(new_isbn) != 13:
+                raise Exception(
+                    "Invalid ISBN conversion for: {}".format(isbn))
+        else:
+            raise Exception(
+                "ISBN for {} has incorrect number of characters: {}" \
+                .format(title_id, isbn)
+            )
+
+        if new_isbn:
+            dest_conn = psycopg2.connect(dest_db_conn_string)
+            with dest_conn:
+                with dest_conn.cursor() as dest_cur:
+                    dest_cur.execute("""
+                        INSERT INTO isbns
+                        (isbn, title_id, book_type, foreign_lang)
+                        VALUES(%s, %s, %s, %s)
+                        ON CONFLICT DO NOTHING;
+                        """, (new_isbn, title_id, book_type, foreign_lang))
+
+        with isbns_processed.get_lock():
+            isbns_processed.value += 1
+    except:
+        logger.exception("\n{}\tFailed to process".format(isbn_tuple[0]))
+        with isbns_errored.get_lock():
+            isbns_errored.value += 1
+        return
+    finally:
+        try:
+            dest_conn.close()
+        except (NameError, psycopg2.InterfaceError):
+            pass
+
+
 def deduplicate_isbn(duplicate_isbn):
     logger.info(str(duplicate_isbn))
 
@@ -318,6 +373,8 @@ def deduplicate_isbn(duplicate_isbn):
                     """, duplicate_isbn
                 )
 
+                # Lock the book and isbn enties in question so that 
+                # concurrent processes don't try to work on the same data
                 dest_cur.execute("""
                     SELECT b.title_id, b.title, b.authors, b.year, b.pages, 
                         b.alt_titles, b.cover_image, 
@@ -338,12 +395,9 @@ def deduplicate_isbn(duplicate_isbn):
                     FOR UPDATE;
                     """, duplicate_isbn
                 )
-
                 isbn_claimants = dest_cur.fetchall()
 
-
                 #TODO lock contents tables
-
 
                 if len(isbn_claimants) == 0:
                     e_str = str(duplicate_isbn[0]) + ": all records " + \
@@ -358,31 +412,58 @@ def deduplicate_isbn(duplicate_isbn):
                 if e_str:
                     raise Exception(e_str)
 
+                # There are two ways to resolve duplicate ISBNs: 
+                # delete the ISBN from both titles (most common), or
+                # "winner takes all", which is reserved for cases where 
+                # the book is more or less just a new edition with extra
+                # material and the book entries can be merged. The rest 
+                # of the logic in this method tries to determine this.
                 _, a_title, a_authors, _, _, _, _, \
                     a_book_type, a_foreign_lang = isbn_claimants[0]
 
                 _, b_title, b_authors, _, _, _, _, \
                     b_book_type, b_foreign_lang = isbn_claimants[1]  
 
+                # The tuple of book types is a key variable in determining
+                # which case this is, since certain changes 
+                # (novel to collection) are typical of extra material 
+                # being added to the new edition of a book, while others
+                # (novella to omnibus) aren't possible without making it
+                # a substantially different book.
                 a_b_book_types =   (a_book_type, b_book_type)
 
                 if (len(isbn_claimants) > 2 or 
                     a_foreign_lang or b_foreign_lang or
                     a_b_book_types in \
                         [('NOVELLA', 'OMNIBUS'), ('NOVEL', 'NOVELLA')]):
+                    # Cases of more than two titles sharing an ISBN are
+                    # pactically always multi-volume series that are 
+                    # sold under a common ISBN, which than is not useful
+                    # for identifying the book. It should be deleted.
+                    # Likewise, any case of foreign isbns causing 
+                    # duplication are too likely to cause errors with 
+                    # winner-take-all, and cases of book type 
+                    # transformation considered impossible are also deleted
 
                     delete_isbn(duplicate_isbn[0], dest_cur)
 
                 else:
-
-
                     if a_b_book_types in [('NOVEL', 'ANTHOLOGY'), \
                         ('NOVEL', 'COLLECTION'), ('NOVEL', 'OMNIBUS'), \
                         ('NOVELLA', 'ANTHOLOGY'), ('NOVELLA', 'COLLECTION')]:
+                        # Book transformations that are technically possible
+                        # by adding or removing small amount of material
+                        # are considered for winner-takes-all only on an
+                        # exact title match
 
                         titles_match = (a_title.lower() == b_title.lower())
 
                     else:
+                        # The most likely cases of book transformation,
+                        # included those were a and b are the same type,
+                        # have a less strict name match requirement. This
+                        # is allow cases like "Ghost Stories", and 
+                        # "Ghost Stories: now with two bonus stories".
 
                         a_simple_title = simplify_title(a_title)
                         b_simple_title = simplify_title(b_title)
@@ -392,6 +473,11 @@ def deduplicate_isbn(duplicate_isbn):
                     if not titles_match:
                         delete_isbn(duplicate_isbn[0], dest_cur)
                     else:
+                        # The final requirement for winner-takes-all is
+                        # for the books to have the same author(s), or
+                        # to have some authors in common to account for
+                        # cases of stories being added or removed from
+                        # some editions.
                         a_author_set = set(a_authors.lower().split(', '))
                         b_author_set = set(b_authors.lower().split(', '))
                         authors_in_common = \
@@ -547,7 +633,7 @@ if __name__ == '__main__':
     print("Total time: {}\n".format(total_time))
 
     
-    #       INDEX TABLES ISBN TABLE
+    #       INDEX TABLES
     dest_conn = psycopg2.connect(dest_db_conn_string)
     try:
         with dest_conn:
@@ -561,13 +647,58 @@ if __name__ == '__main__':
                     print("Total time: {}\n".format(total_time))
                 print("Creating Indexes...")
                 index_book_tables(dest_cur)
+
+                print("\nAdding ISBN 10 and 13 entries where they are missing")
                 start = datetime.now()
-                print("Depulicating ISBNs...")
                 print("Start time: {}".format(start))
-                duplicate_isbns = get_duplicate_isbns(dest_cur)
-                insert_virtual_books(dest_cur)
+                isbn_tuples = get_all_isbn_tuples(dest_cur)
     except:
-        error_str = "Problem indexing or getting duplicate ISBNs"
+        error_str = "Problem indexing or getting ISBNs"
+        print(error_str)
+        logger.exception(error_str)
+    finally:
+        dest_conn.close()
+
+
+
+    #       MAIN ISBN 10 - 13 LOOP
+    isbns_processed = Value('i', 0)
+    isbns_errored = Value('i', 0)
+    print("Processing {} isbns".format(len(isbn_tuples)))
+    if PROGRESS_BAR:
+        i = Value('i', 0)
+        two_percent_increment = ceil(len(isbn_tuples) / 50)
+        print("\n# = {} isbns processed".format(two_percent_increment))
+        print("1%[" + "    ."*10 + "]100%")
+        print("  [", end='', flush=True)
+
+    # Process isbns in parallel
+    with Pool(pool_size) as p:
+        p.map(create_isbn_10_and_13, isbn_tuples)
+ 
+    if PROGRESS_BAR:
+        print("]")
+
+    end = datetime.now()
+    total_time = (end - start)
+    print("\nisbns processed: {}".format(isbns_processed.value))
+    print("isbns errored: {}".format(isbns_errored.value))
+    print("Total time: {}\n".format(total_time))
+
+
+    #       ISBN DEDUPLICATION 
+    print("Depulicating ISBNs...")
+    start = datetime.now()
+    print("Start time: {}".format(start))
+
+    dest_conn = psycopg2.connect(dest_db_conn_string)
+    try:
+        with dest_conn:
+            with dest_conn.cursor() as dest_cur:
+                insert_virtual_books(dest_cur)
+                duplicate_isbns = get_duplicate_isbns(dest_cur)
+    except:
+        error_str = "Problem getting duplicate ISBNs"
         print(error_str)
         logger.exception(error_str)
     finally:
@@ -576,7 +707,6 @@ if __name__ == '__main__':
     isbns_deduped = Value('i', 0)
     isbns_errored = Value('i', 0)
 
-    #       MAIN ISBN DEDUPLICATION LOOP
     print("\nMain isbn deduplication loop...")
     print("Processing {} isbns".format(len(duplicate_isbns)))
     if PROGRESS_BAR:

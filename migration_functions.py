@@ -217,30 +217,39 @@ def populate_search_columns(dest_cur):
         CREATE INDEX ON books USING GIN ( general_search );
 
         CREATE EXTENSION IF NOT EXISTS pg_trgm;
+        
         CREATE INDEX ON books 
-            USING GIST (title gist_trgm_ops(siglen=256));
+            USING GIST (title gist_trgm_ops);
         CREATE INDEX ON books 
-            USING GIST (authors gist_trgm_ops(siglen=256));
+            USING GIST (authors gist_trgm_ops);
         CREATE INDEX ON books 
-            USING GIST (alt_titles gist_trgm_ops(siglen=256));
+            USING GIST (alt_titles gist_trgm_ops);
 
+        DROP TABLE IF EXISTS words;
+
+        CREATE EXTENSION IF NOT EXISTS fuzzystrmatch;
         CREATE TABLE words AS 
-            SELECT word 
+            SELECT word, ndoc, nentry
             FROM ts_stat(
                 'SELECT 
-                    to_tsvector(''simple'', title) ||
-                    to_tsvector(''simple'', coalesce(authors, '' '')) ||
-                    to_tsvector(''simple'', coalesce(alt_titles, '' '')) ||
+                    to_tsvector(''simple'', unaccent(title)) ||
+                    to_tsvector(''simple'', 
+                        coalesce(unaccent(authors), '' '')) ||
+                    to_tsvector(''simple'', 
+                        coalesce(unaccent(alt_titles), '' '')) ||
                     to_tsvector(''simple'', coalesce(
-                        substring(series_str_1 from ''the (.*) series.''), '' ''
-                    ))
+                        unaccent(substring(
+                            series_str_1 from ''the (.*) series.''
+                        )), 
+                    '' ''))
                 FROM books'
             );
 
-        CREATE INDEX ON words 
-            USING GIST (word gist_trgm_ops(siglen=1024));
-        CREATE INDEX ON words 
-            USING hash (word);
+        ALTER TABLE words ADD COLUMN nentry_log integer;
+        UPDATE words SET nentry_log = FLOOR(LOG(2, nentry));
+
+        CREATE INDEX ON words(word);
+        CREATE INDEX on words(nentry_log);
 
         """
     )
@@ -630,9 +639,8 @@ note_regex_subs = [
         (re.compile( r"{{Incomplete}}", re.IGNORECASE ), 
             r"The Contents section of this record is incomplete; " + \
             r"additional eligible titles still need to be added." ),
-        (re.compile( r"{{(.*?)|(.*?)}}" ), r"\2"),
+        (re.compile( r"{{(.*?)\|(.*?)}}" ), r"\2"),
         (re.compile( r"{{(.*?)}}" ), r" "),
-        (re.compile( r"(.*?)http:(.*?)", re.IGNORECASE ), r"\1https:\2" )
     ]
 
 def get_note(note_id, source_cur):

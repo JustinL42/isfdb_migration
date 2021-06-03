@@ -5,6 +5,14 @@
 # been deleted due to being re-used for completely different books. 
 INCONSISTENT_ISBN_VIRTUAL_TITLE = 73
 
+def get_all_isbn_tuples(dest_cur):
+    dest_cur.execute("""
+        SELECT isbn, title_id, book_type, foreign_lang
+        FROM isbns
+        """
+    )
+    return dest_cur.fetchall()
+
 def get_duplicate_isbns(dest_cur):
     dest_cur.execute("""
         SELECT isbn 
@@ -27,6 +35,24 @@ def insert_virtual_books(dest_cur):
         VALUES(%s, 'Ambiguous ISBN', 'NOVEL', True, %s)
         ON CONFLICT DO NOTHING;
         """, (INCONSISTENT_ISBN_VIRTUAL_TITLE, ambigous_isbn_note))
+
+
+def isbn10_to_13(isbn10):
+    cd = ( 10 - ( sum([38] + [int(x) * 3 for x in isbn10[:-1][0::2]] + \
+        [int(x) for x in isbn10[:-1][1::2]]) % 10 ) ) % 10
+    return '978' + isbn10[:-1]  + str(cd)
+
+
+def isbn13_to_10(isbn13):
+    cd = (11 - sum([
+        int(digit) * weight \
+        for digit, weight \
+        in zip(isbn13[3:12], range(10,1,-1))
+    ])) % 11
+    if cd == 10:
+        cd = 'X'
+    return isbn13[3:12] + str(cd)
+
 
 def delete_isbn(isbn, dest_cur):
 
@@ -54,12 +80,9 @@ def delete_isbn(isbn, dest_cur):
             
 
 def winner_takes_all(isbn_claimants, dest_cur):
-    # The winner inherits all the losers' contents and 
-    #containers, isbns, translations, and images. Conflicts 
-    # based on the winner # already having the item are 
-    # expected and can be ignored.
-
-    # b.title_id, b.title, b.year, b.pages, b.alt_titles, b.cover_image, i.book_type, i.foreign_lang
+    # The winner inherits all the losers' contents and  containers, 
+    # isbns, translations, and images. Conflicts based on the winner 
+    # already having the item are expected and can be ignored.
 
     winner_id = isbn_claimants[0][0]
 
