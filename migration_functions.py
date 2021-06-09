@@ -352,9 +352,15 @@ def get_original_fields(title_id, parent_id, source_cur, language_dict):
         SELECT title_id, title_title as translation_title, 
             YEAR(title_copyright) as translation_year, note_id 
         FROM titles 
-        WHERE title_language = %s 
+        WHERE title_language = %s
+        AND ( 
+            (title_ttype = 'SHORTFICTION' AND title_storylen = 'novella') 
+            OR title_ttype IN ('ANTHOLOGY', 'COLLECTION', 'NOVEL', 'OMNIBUS')
+        )
+        AND title_non_genre != 'Yes' 
+        AND title_graphic != 'Yes'
         AND title_parent = %s 
-        ORDER BY translation_year DESC, title_id DESC ;
+        ORDER BY translation_year DESC, title_id DESC;
         """, (my_lang, parent_id))
     preferred_translations = source_cur.fetchall()
 
