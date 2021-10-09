@@ -15,6 +15,7 @@ import psycopg2
 
 from migration_functions import *
 from isbn_deduplication_functions import *
+from cold_start import cold_start_ranks
 
 PROGRESS_BAR = True
 N_PROC = -2
@@ -55,6 +56,8 @@ def process_title(title_data):
         return
     elif year == 0:
         year = None
+
+    rank = cold_start_ranks.get(title_id, None)
 
     source_conn = mysql.connector.connect(**source_db_params)
     try:
@@ -179,17 +182,24 @@ def process_title(title_data):
                     isbn, pages, editions, alt_titles, 
                     series_str_1, series_str_2, 
                     original_lang, original_title, original_year, 
-                    isfdb_rating, award_winner, juvenile, stand_alone, 
-                    cover_image, wikipedia, synopsis, note) 
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 
-                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                    isfdb_rating, cold_start_rank, award_winner, 
+                    juvenile, stand_alone, cover_image, wikipedia, 
+                    synopsis, note) 
+                    VALUES (%s, %s, %s, %s, %s, 
+                            %s, %s, %s, %s, 
+                            %s, %s, 
+                            %s, %s, %s, 
+                            %s, %s, %s, 
+                            %s, %s, %s, %s, 
+                            %s, %s);
                 """, (
                     title_id, unescape(title), year, authors, ttype, 
                     isbn, pages, editions, alt_titles, 
                     series_str_1, series_str_2, 
                     original_lang, original_title, original_year, 
-                    rating, award_winner, juvenile, stand_alone, 
-                    cover_image, wikipedia, synopsis, note)
+                    rating, rank, award_winner, 
+                    juvenile, stand_alone, cover_image, wikipedia, 
+                    synopsis, note)
                 )
 
 

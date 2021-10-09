@@ -165,7 +165,8 @@ def winner_takes_all(isbn_claimants, dest_cur):
         logger.info("{} deleted {}. {} rows affected" \
             .format(winner_id, claimant_id, dest_cur.rowcount))
 
-    #TODO add losers' titles as alternate titles
+    #TODO add losers' titles as alternate titles, 
+    # rating, cold start rank, etc.
     dest_cur.execute("""
         UPDATE books
         SET inconsistent = TRUE

@@ -139,6 +139,7 @@ def prepare_books_tables(dest_cur):
             original_title      text default NULL,
             original_year       text default NULL,
             isfdb_rating        real default NULL, 
+            cold_start_rank     integer default NULL,
             award_winner        boolean default FALSE,
             juvenile            boolean default FALSE,
             stand_alone         boolean default FALSE,
