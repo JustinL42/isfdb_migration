@@ -32,12 +32,13 @@ For instructions on mounting the source My database, see:
 [http://www.isfdb.org/wiki/index.php/ISFDB:MySQL_Only_Setup](http://www.isfdb.org/wiki/index.php/ISFDB:MySQL_Only_Setup)
 
 **Requirements:**
-PostgreSQL 13 (older versions my require modification of newer index functions)
-Python 3.8
+PostgreSQL 13 or later (older versions my require modification of newer index functions)
+Python 3.8 or later.
 psycopg2
 pymysql
 sqlalchemy
 pandas
+multiprocessing-logging
 
 This script has only been tested on Ubuntu 18. It is likely to run on other unix-like systems without significant modification. There are known incompatibilities with Windows that would require modification.
 
@@ -46,12 +47,15 @@ This script has only been tested on Ubuntu 18. It is likely to run on other unix
 1. Download the ISFBD database and load it into MySQL using the above instructions.
 2. In migration_script.py, set the script configuration variables, including the destination database name, and any required database passwords.
 3. In the destination datbase (Postgres) create the database with the name you chose, e.g.:
-	CREATE DATABSE recsysetl;
+~~~
+CREATE DATABASE recsysetl;
+~~~
 4. When the script is run for the first time, it will attempt to create the custom dictionary for indexing. This requires root access. While you can run the main script with root access, it is preferrable to run this command as root instead:
-
-	sudo su
-	python3 -c "from migration_functions import *; setup_custom_stop_words()" 
-
-5) At this point, the main script can by run:
-
-	python3 migration_script.py
+~~~
+sudo su
+python3 -c "from migration_functions import *; setup_custom_stop_words()"
+~~~
+5. At this point, the main script can by run:
+~~~
+python3 migration_script.py
+~~~
