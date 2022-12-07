@@ -33,7 +33,7 @@ source_db_params = dict(
 )
 
 dest_db_name = "recsysetl"
-dest_db_conn_string = "port=5434 dbname={} user=postgres".format(dest_db_name)
+dest_db_conn_string = "port=5432 dbname={} user=postgres".format(dest_db_name)
 
 source_db_alchemy_conn_string ='mysql+pymysql://root:@127.0.0.1/isfdb'
 
@@ -743,10 +743,9 @@ if __name__ == '__main__':
     dest_conn = psycopg2.connect(dest_db_conn_string)
     dest_conn.autocommit = True
     try:
-        with dest_conn:
-            with dest_conn.cursor() as dest_cur:
-                print("Constraining, Vacuuming, an Analyzing database...")
-                constrain_vacuum_analyze(dest_cur)
+        dest_cur = dest_conn.cursor()
+        print("Constraining, Vacuuming, an Analyzing database...")
+        constrain_vacuum_analyze(dest_cur)
     except:
         error_str = "Problem constraining ISBN table, Vacuuming or Analyzing."
         print(error_str)

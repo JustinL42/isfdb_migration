@@ -429,7 +429,7 @@ def get_pub_fields(title_id, root_id, ttype, source_alch_conn):
         stand_alone = True
     else:
         # This title (probably a novella) was never published on its own.
-        # Don't look fall_isbnsor publication related information
+        # Don't look for all_isbns or publication related information
         stand_alone = False
         pages = cover_image = isbn = None
         all_isbns = more_images = []
@@ -485,12 +485,15 @@ def get_pub_fields(title_id, root_id, ttype, source_alch_conn):
     pages = None
     en_editions = en_editions.sort_values(
         by=['title_id', 'pub_ptype', 'p_year', 'pub_id'], key=preferred_pubs)
-    for page_str in en_editions.pub_pages:
+    for edition in en_editions.itertuples():
+        # One incorret entry has the page count set the ISBN. Skip thise one.
+        if edition.pub_pages == edition.pub_isbn:
+            continue
         # Might be in a format like: "vii+125+[10]" or "125+[10]"
         # try the second and then the first positions before giving up
         for ii in (1,0):
             try:
-                pages = int(page_str.split("+")[ii])
+                pages = int(edition.pub_pages.split("+")[ii])
                 break
             except (AttributeError, IndexError, ValueError):
                 pass
@@ -762,7 +765,6 @@ def constrain_vacuum_analyze(dest_cur):
     )
 
     dest_cur.execute("""
-        -- VACUUM FULL;
         VACUUM;
         """
     )
