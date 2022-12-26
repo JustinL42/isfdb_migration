@@ -55,7 +55,7 @@ def create_custom_text_search_config(language_name, dest_cur):
     language_name = language_name.lower()
     dest_cur.execute(
         """
-        SELECT cfgname 
+        SELECT cfgname
         FROM pg_ts_config
         WHERE cfgname = %s
         """,
@@ -88,15 +88,15 @@ def create_custom_text_search_config(language_name, dest_cur):
 
     dest_cur.execute(
         """
-        CREATE TEXT SEARCH CONFIGURATION public.isfdb_title_tsc 
+        CREATE TEXT SEARCH CONFIGURATION public.isfdb_title_tsc
             ( COPY = %s );
 
         ALTER TEXT SEARCH CONFIGURATION public.isfdb_title_tsc
             DROP MAPPING FOR email, url, url_path, sfloat, float;
 
-        ALTER TEXT SEARCH CONFIGURATION public.isfdb_title_tsc 
-            ALTER MAPPING FOR asciiword, asciihword, hword_asciipart, 
-            word, hword, hword_part 
+        ALTER TEXT SEARCH CONFIGURATION public.isfdb_title_tsc
+            ALTER MAPPING FOR asciiword, asciihword, hword_asciipart,
+            word, hword, hword_part
             WITH isfdb_title_dict;
         """,
         (language_name,),
@@ -126,7 +126,7 @@ def safe_drop_tables(tables, dest_cur):
     ]:
 
         for table in tables:
-            dest_cur.execute("DROP {} IF EXISTS {}".format(entity_name, table))
+            dest_cur.execute(f"DROP {entity_name} IF EXISTS {table}")
     return True
 
 
@@ -161,7 +161,7 @@ def prepare_books_tables(dest_cur):
             original_lang       text default NULL,
             original_title      text default NULL,
             original_year       text default NULL,
-            isfdb_rating        real default NULL, 
+            isfdb_rating        real default NULL,
             cold_start_rank     integer default NULL,
             award_winner        boolean default FALSE,
             juvenile            boolean default FALSE,
@@ -179,16 +179,16 @@ def prepare_books_tables(dest_cur):
         CREATE TABLE isbns (
             id          serial PRIMARY KEY,
             isbn        varchar(13) NOT NULL CHECK (isbn <> ''),
-            title_id    integer NOT NULL 
+            title_id    integer NOT NULL
                 REFERENCES books (title_id) ON DELETE CASCADE,
-            book_type   ttype NOT NULL,  
+            book_type   ttype NOT NULL,
             foreign_lang     boolean default FALSE,
             UNIQUE (isbn, title_id)
         );
 
         CREATE TABLE translations (
             title_id            integer NOT NULL,
-            lowest_title_id     integer NOT NULL 
+            lowest_title_id     integer NOT NULL
                 REFERENCES books (title_id) ON DELETE CASCADE,
             title               text NOT NULL CHECK (title <> ''),
             year                integer default NULL,
@@ -200,18 +200,18 @@ def prepare_books_tables(dest_cur):
 
         CREATE TABLE contents (
             id                  serial PRIMARY KEY,
-            book_title_id       integer NOT NULL 
+            book_title_id       integer NOT NULL
                 REFERENCES books (title_id) ON DELETE CASCADE,
-            content_title_id    integer NOT NULL 
+            content_title_id    integer NOT NULL
                 REFERENCES books (title_id) ON DELETE CASCADE
-                CONSTRAINT content_of_self 
+                CONSTRAINT content_of_self
                     CHECK (content_title_id != book_title_id),
             UNIQUE (book_title_id, content_title_id)
         );
 
         CREATE TABLE more_images (
             id          serial PRIMARY KEY,
-            title_id    integer NOT NULL 
+            title_id    integer NOT NULL
                 REFERENCES books (title_id) ON DELETE CASCADE,
             image       text default NULL CHECK (image <> ''),
             UNIQUE (title_id, image)
@@ -226,14 +226,14 @@ def populate_search_columns(dest_cur):
         CREATE EXTENSION IF NOT EXISTS unaccent;
         UPDATE books
         set general_search = (
-            setweight(to_tsvector('isfdb_title_tsc', 
-                unaccent(title)), 'A') || 
-            setweight(to_tsvector('isfdb_title_tsc', 
+            setweight(to_tsvector('isfdb_title_tsc',
+                unaccent(title)), 'A') ||
+            setweight(to_tsvector('isfdb_title_tsc',
                 unaccent(coalesce(authors, ' '))), 'B') ||
-            setweight(to_tsvector('isfdb_title_tsc', 
+            setweight(to_tsvector('isfdb_title_tsc',
                 unaccent(coalesce(alt_titles, ' '))), 'C') ||
             setweight(to_tsvector(
-                'isfdb_title_tsc', 
+                'isfdb_title_tsc',
                 unaccent(coalesce(
                     substring(series_str_1 from 'the (.*) series.'), ' '
                 ) )
@@ -242,30 +242,30 @@ def populate_search_columns(dest_cur):
         CREATE INDEX ON books USING GIN ( general_search );
 
         CREATE EXTENSION IF NOT EXISTS pg_trgm;
-        
-        CREATE INDEX ON books 
+
+        CREATE INDEX ON books
             USING GIST (title gist_trgm_ops);
-        CREATE INDEX ON books 
+        CREATE INDEX ON books
             USING GIST (authors gist_trgm_ops);
-        CREATE INDEX ON books 
+        CREATE INDEX ON books
             USING GIST (alt_titles gist_trgm_ops);
 
         DROP TABLE IF EXISTS words;
 
         CREATE EXTENSION IF NOT EXISTS fuzzystrmatch;
-        CREATE TABLE words AS 
+        CREATE TABLE words AS
             SELECT word, ndoc, nentry
             FROM ts_stat(
-                'SELECT 
+                'SELECT
                     to_tsvector(''simple'', unaccent(title)) ||
-                    to_tsvector(''simple'', 
+                    to_tsvector(''simple'',
                         coalesce(unaccent(authors), '' '')) ||
-                    to_tsvector(''simple'', 
+                    to_tsvector(''simple'',
                         coalesce(unaccent(alt_titles), '' '')) ||
                     to_tsvector(''simple'', coalesce(
                         unaccent(substring(
                             series_str_1 from ''the (.*) series.''
-                        )), 
+                        )),
                     '' ''))
                 FROM books'
             );
@@ -310,7 +310,7 @@ def index_book_tables(dest_cur):
 def get_language_dict(source_cur):
     source_cur.execute(
         """
-        SELECT lang_id, lang_name 
+        SELECT lang_id, lang_name
         FROM languages;
         """
     )
@@ -323,20 +323,20 @@ def get_language_dict(source_cur):
 def get_all_titles(source_cur, limit=None):
     print("main title table query...")
     sql = f"""
-        SELECT title_id, title_title, title_synopsis, note_id, series_id, 
-            title_seriesnum, YEAR(title_copyright) as year, title_ttype, 
+        SELECT title_id, title_title, title_synopsis, note_id, series_id,
+            title_seriesnum, YEAR(title_copyright) as year, title_ttype,
             title_parent, title_rating, title_seriesnum_2, title_jvn
-        FROM titles  
-        WHERE ( 
-            (title_ttype = 'SHORTFICTION' AND title_storylen = 'novella') 
+        FROM titles
+        WHERE (
+            (title_ttype = 'SHORTFICTION' AND title_storylen = 'novella')
             OR title_ttype IN ('ANTHOLOGY', 'COLLECTION', 'NOVEL', 'OMNIBUS')
-        ) 
+        )
         AND title_language = {cfg.ENGLISH}
-        AND title_non_genre != 'Yes' 
+        AND title_non_genre != 'Yes'
         AND title_graphic != 'Yes'
         AND title_id NOT IN (
-            SELECT title_id 
-            FROM  canonical_author 
+            SELECT title_id
+            FROM  canonical_author
             WHERE author_id in ({cfg.EXCLUDED_AUTHORS})
         )"""
 
@@ -350,8 +350,8 @@ def get_all_titles(source_cur, limit=None):
 def get_original_fields(title_id, parent_id, source_cur, language_dict):
     source_cur.execute(
         """
-        SELECT original.title_title, 
-            YEAR(original.title_copyright) as original_year, 
+        SELECT original.title_title,
+            YEAR(original.title_copyright) as original_year,
             original.title_language
         FROM titles as original
         JOIN titles as translation
@@ -363,30 +363,31 @@ def get_original_fields(title_id, parent_id, source_cur, language_dict):
     )
     original_title, original_year, original_lang = source_cur.fetchone()
 
-    # If the original language is also cfg.MY_LANG, this is just a variant title.
-    # Process this title when the loop is the parent title instead.
+    # If the original language is also cfg.MY_LANG, this is just a
+    # variant title. Process this title when the loop is the parent
+    # title instead.
     if original_lang == cfg.MY_LANG:
         return False
 
     original_lang = language_dict[original_lang]
-    if original_year == 0 or original_year == 8888:
+    if original_year in (0, 8888):
         original_year = None
 
     # The title is a translation of a foreign language work into cfg.MY_LANG.
     # Get all the cfg.MY_LANG translations
     source_cur.execute(
         """
-        SELECT title_id, title_title as translation_title, 
-            YEAR(title_copyright) as translation_year, note_id 
-        FROM titles 
+        SELECT title_id, title_title as translation_title,
+            YEAR(title_copyright) as translation_year, note_id
+        FROM titles
         WHERE title_language = %s
-        AND ( 
-            (title_ttype = 'SHORTFICTION' AND title_storylen = 'novella') 
+        AND (
+            (title_ttype = 'SHORTFICTION' AND title_storylen = 'novella')
             OR title_ttype IN ('ANTHOLOGY', 'COLLECTION', 'NOVEL', 'OMNIBUS')
         )
-        AND title_non_genre != 'Yes' 
+        AND title_non_genre != 'Yes'
         AND title_graphic != 'Yes'
-        AND title_parent = %s 
+        AND title_parent = %s
         ORDER BY translation_year DESC, title_id DESC;
         """,
         (cfg.MY_LANG, parent_id),
@@ -404,7 +405,7 @@ def get_original_fields(title_id, parent_id, source_cur, language_dict):
 
     for tr in preferred_translations:
         tr_year = tr[2]
-        if tr_year == 0 or tr_year == 8888:
+        if tr_year in (0, 8888):
             tr_year = None
 
         note_id = tr[3]
@@ -429,8 +430,8 @@ def get_original_fields(title_id, parent_id, source_cur, language_dict):
 def get_pub_fields(title_id, root_id, ttype, source_alch_conn):
     all_pubs = pd.read_sql(
         """
-        SELECT t.title_id, t.title_language, p.pub_id, 
-            YEAR(p.pub_year) as p_year, p.pub_pages, p.pub_ptype, 
+        SELECT t.title_id, t.title_language, p.pub_id,
+            YEAR(p.pub_year) as p_year, p.pub_pages, p.pub_ptype,
             p.pub_ctype, p.pub_isbn, p.pub_frontimage
         FROM pubs as p
         JOIN pub_content as c
@@ -483,7 +484,7 @@ def get_pub_fields(title_id, root_id, ttype, source_alch_conn):
 
     # map all remaining ISBNs to this title_id in the isbn table
     all_isbns = all_editions[
-        ((all_editions.pub_isbn != None) & (all_editions.pub_isbn != ""))
+        ((all_editions.pub_isbn is not None) & (all_editions.pub_isbn != ""))
     ]
 
     all_isbns = (
@@ -494,10 +495,10 @@ def get_pub_fields(title_id, root_id, ttype, source_alch_conn):
     # change title_langauge to work as the foreign_lang boolean key
     # in the isbn table
     all_isbns["title_language"] = all_isbns["title_language"].apply(
-        lambda l: True if l != 17 else False
+        lambda lang: lang != cfg.ENGLISH
     )
     all_isbns["pub_ctype"] = all_isbns["pub_ctype"].apply(
-        lambda t: "NOVELLA" if t == "CHAPBOOK" else t
+        lambda ctype: "NOVELLA" if ctype == "CHAPBOOK" else ctype
     )
     all_isbns = (
         all_isbns.sort_values(by="title_language")
@@ -513,25 +514,23 @@ def get_pub_fields(title_id, root_id, ttype, source_alch_conn):
         if pub_column.name == "title_id":
             # Favor the curent title_id above all else, which is either
             # the parent title or the most recent cfg.MY_LANG translation
-            favor_title_id = lambda t_id: 1 if t_id == title_id else 2
-            return pub_column.map(favor_title_id)
-        elif pub_column.name == "pub_ptype":
+            return pub_column.map(lambda t_id: 1 if t_id == title_id else 2)
+        if pub_column.name == "pub_ptype":
             # Favor trade paperback, then hardcovers, then paperback,
             # then ebook, then anything else.
-            favor_trade_paperback = lambda ptype: {
-                "tp": 1,
-                "hc": 2,
-                "pb": 3,
-                "ebook": 4,
-            }.get(ptype, 5)
-            return pub_column.map(favor_trade_paperback)
-        elif pub_column.name == "p_year" or pub_column.name == "pub_id":
+            return pub_column.map(
+                lambda ptype: {
+                    "tp": 1,
+                    "hc": 2,
+                    "pb": 3,
+                    "ebook": 4,
+                }.get(ptype, 5)
+            )
+        if pub_column.name in ("p_year", "pub_id"):
             # Favor newer publications.
             # Make it negative to affect a descending sort on year or id
             return -pub_column
-        else:
-            raise Exception("Invalid column passed to preferred_pubs")
-            return pub_column
+        raise Exception("Invalid column passed to preferred_pubs")
 
     pages = None
     en_editions = en_editions.sort_values(
@@ -609,7 +608,7 @@ def get_pub_fields(title_id, root_id, ttype, source_alch_conn):
         (
             (en_editions.pub_isbn.notnull())
             & (en_editions.pub_isbn != "")
-            & (en_editions.pub_ptype.str.contains("audio") == False)
+            & (en_editions.pub_ptype.str.contains("audio") is False)
         )
     ].pub_isbn.to_list()
 
@@ -637,19 +636,16 @@ def get_alternate_titles(title_id, title, source_cur):
     WHERE title_parent = %s
     AND title_language = %s
     AND title_title != %s
-    AND title_title NOT REGEXP 
+    AND title_title NOT REGEXP
         'part [[:digit:]]+ of |boxed set|abridged|complete novel'
     """,
         (title_id, cfg.MY_LANG, title),
     )
-    title_set = (
-        set([r[0] for r in source_cur.fetchall()]) - set(title) - set([""])
-    )
+    title_set = {r[0] for r in source_cur.fetchall()} - set(title) - set([""])
 
     if not title_set:
         return None
-    else:
-        alt_titles = unescape("; ".join([title for title in title_set]))
+    alt_titles = unescape("; ".join(list(title_set)))
 
     # if alt_titles is too long, it is probably an
     # injudicious application of alternate titles and shouldn't be used
@@ -684,7 +680,7 @@ def get_wikipedia_link(title_id, source_cur):
         """
         SELECT url
         FROM webpages
-        WHERE title_id = %s 
+        WHERE title_id = %s
         AND url like '%en.wikipedia.org%'
         """,
         (title_id,),
@@ -771,22 +767,21 @@ def get_series_strings(
     if not series_id:
         if parent_id == 0:
             return (None, None)
-        else:
-            source_cur.execute(
-                """
-                SELECT series_id, title_seriesnum, title_seriesnum_2
-                FROM titles
-                WHERE title_id = %s
-                """,
-                (parent_id,),
-            )
-            series_data = source_cur.fetchone()
-            if not series_data:
-                return (None, None)
-            series_data = series_id, seriesnum, seriesnum_2
-            return get_series_strings(
-                0, series_id, seriesnum, seriesnum_2, source_cur
-            )
+        source_cur.execute(
+            """
+            SELECT series_id, title_seriesnum, title_seriesnum_2
+            FROM titles
+            WHERE title_id = %s
+            """,
+            (parent_id,),
+        )
+        series_data = source_cur.fetchone()
+        if not series_data:
+            return (None, None)
+        series_data = series_id, seriesnum, seriesnum_2
+        return get_series_strings(
+            0, series_id, seriesnum, seriesnum_2, source_cur
+        )
 
     source_cur.execute(
         """
@@ -846,9 +841,9 @@ def get_contents(title_id, ttype, source_cur):
                     JOIN (
                         SELECT %s AS title_id
                         UNION
-                        SELECT title_id 
-                        FROM titles 
-                        WHERE title_parent = %s 
+                        SELECT title_id
+                        FROM titles
+                        WHERE title_parent = %s
                         AND title_language = %s
                     ) AS t1
                     ON t1.title_id = c1.title_id
@@ -859,7 +854,7 @@ def get_contents(title_id, ttype, source_cur):
                 AND
                 t2.title_storylen = 'novella'
             )
-            OR t2.title_ttype IN 
+            OR t2.title_ttype IN
             ('NOVEL', 'COLLECTION', 'ANTHOLOGY', 'OMNIBUS')
         )
         AND t2.title_id != %s;
@@ -872,7 +867,7 @@ def get_contents(title_id, ttype, source_cur):
 def constrain_vacuum_analyze(dest_cur):
     dest_cur.execute(
         """
-        ALTER TABLE isbns 
+        ALTER TABLE isbns
         ADD CONSTRAINT injective_isbn_to_title_id UNIQUE (isbn);
         """
     )
@@ -882,10 +877,3 @@ def constrain_vacuum_analyze(dest_cur):
         VACUUM;
         """
     )
-
-    # Analysis isn't preserved after moving the database
-    # Do this on destination app instead
-    # dest_cur.execute("""
-    #     ANALYZE;
-    #     """
-    # )

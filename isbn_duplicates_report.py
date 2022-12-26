@@ -1,6 +1,9 @@
 import psycopg2
 
-dest_conn = psycopg2.connect(dest_db_conn_string)
+import setup_configuration as cfg
+
+
+dest_conn = psycopg2.connect(cfg.DEST_DB_CONN_STRING)
 try:
     with dest_conn:
         with dest_conn.cursor() as dest_cur:
@@ -8,7 +11,7 @@ try:
                 """
                 select isbn, count(*) as isbn_count
                 from isbns
-                group by isbn 
+                group by isbn
                 having count(*) > 1
                 order by count(*) DESC;
                 """
@@ -24,7 +27,7 @@ try:
                 i += 1
                 dest_cur.execute(
                     """
-                    select i.isbn, i.foreign_lang, i.book_type, b.title_id, 
+                    select i.isbn, i.foreign_lang, i.book_type, b.title_id,
                         b.year, b.pages, b.authors, b.title, b.note
                     from isbns as i
                     join books as b
@@ -47,9 +50,8 @@ try:
                     )
                     print("\t" + note, end="")
                     print(
-                        "\thttp://www.isfdb.org/cgi-bin/title.cgi?{}".format(
-                            result[1]
-                        ),
+                        "\thttp://www.isfdb.org/cgi-bin/title.cgi?"
+                        f"{result[1]}",
                         end="",
                     )
                     print("\n", end="")

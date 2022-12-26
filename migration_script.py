@@ -75,7 +75,7 @@ def process_title(title_data):
         with titles_skipped.get_lock():
             titles_skipped.value += 1
         return
-    elif year == 0:
+    if year == 0:
         year = None
 
     rank = cold_start_ranks.get(title_id, None)
@@ -100,9 +100,7 @@ def process_title(title_data):
                 # work, or it is an English translation but not the most
                 # recent. Skip it an wait to process the better title.
                 logger.info(
-                    "\n{}\t{}\tSkipped: Not preferred title".format(
-                        title_id, title
-                    )
+                    f"\n{title_id}\t{title}\tSkipped: Not preferred title"
                 )
                 with titles_skipped.get_lock():
                     titles_skipped.value += 1
@@ -138,9 +136,7 @@ def process_title(title_data):
         if not pub_fields:
             # this title isn't available in book form
             logger.info(
-                "\n{}\t{}\tSkipped: Not available as a book".format(
-                    title_id, title
-                )
+                f"\n{title_id}\t{title}\tSkipped: Not available as a book"
             )
             with titles_skipped.get_lock():
                 titles_skipped.value += 1
@@ -182,10 +178,7 @@ def process_title(title_data):
         else:
             note = None
 
-        if title_jvn == "Yes":
-            juvenile = True
-        else:
-            juvenile = False
+        juvenile = bool(title_jvn == "Yes")
 
         # For translated works, use data from the most recent
         # translation, but use the lowest title_id of all the
@@ -198,7 +191,7 @@ def process_title(title_data):
 
     except:
         logger.exception(
-            "\n{}\t{}\tSource db error".format(title_data[0], title_data[1])
+            f"\n{title_data[0]}\t{title_data[1]}\tSource db error"
         )
         with titles_errored.get_lock():
             titles_errored.value += 1
@@ -213,20 +206,20 @@ def process_title(title_data):
 
                 dest_cur.execute(
                     """
-                    INSERT INTO books 
-                    (title_id, title, year, authors, book_type, 
-                    isbn, pages, editions, alt_titles, 
-                    series_str_1, series_str_2, 
-                    original_lang, original_title, original_year, 
-                    isfdb_rating, cold_start_rank, award_winner, 
-                    juvenile, stand_alone, cover_image, wikipedia, 
-                    synopsis, note) 
-                    VALUES (%s, %s, %s, %s, %s, 
-                            %s, %s, %s, %s, 
-                            %s, %s, 
-                            %s, %s, %s, 
-                            %s, %s, %s, 
-                            %s, %s, %s, %s, 
+                    INSERT INTO books
+                    (title_id, title, year, authors, book_type,
+                    isbn, pages, editions, alt_titles,
+                    series_str_1, series_str_2,
+                    original_lang, original_title, original_year,
+                    isfdb_rating, cold_start_rank, award_winner,
+                    juvenile, stand_alone, cover_image, wikipedia,
+                    synopsis, note)
+                    VALUES (%s, %s, %s, %s, %s,
+                            %s, %s, %s, %s,
+                            %s, %s,
+                            %s, %s, %s,
+                            %s, %s, %s,
+                            %s, %s, %s, %s,
                             %s, %s);
                 """,
                     (
@@ -259,8 +252,8 @@ def process_title(title_data):
                 for book_isbn, book_ttype, foreign_lang in all_isbns:
                     dest_cur.execute(
                         """
-                        INSERT INTO isbns 
-                        (isbn, title_id, book_type, foreign_lang) 
+                        INSERT INTO isbns
+                        (isbn, title_id, book_type, foreign_lang)
                         VALUES (%s, %s, %s, %s);
                         """,
                         (book_isbn, title_id, book_ttype, foreign_lang),
@@ -275,8 +268,8 @@ def process_title(title_data):
 
                     dest_cur.execute(
                         """
-                        INSERT INTO translations 
-                        (title_id, lowest_title_id, title, year, note) 
+                        INSERT INTO translations
+                        (title_id, lowest_title_id, title, year, note)
                         VALUES (%s, %s, %s, %s, %s);
                         """,
                         (
@@ -291,11 +284,11 @@ def process_title(title_data):
                 for image in more_images:
                     dest_cur.execute(
                         """
-                        INSERT INTO more_images 
-                        (title_id, image) 
+                        INSERT INTO more_images
+                        (title_id, image)
                         VALUES (%s, %s)
-                        ON CONFLICT 
-                        ON CONSTRAINT more_images_title_id_image_key 
+                        ON CONFLICT
+                        ON CONSTRAINT more_images_title_id_image_key
                         DO NOTHING;
                     """,
                         (title_id, image),
@@ -303,9 +296,7 @@ def process_title(title_data):
 
     except:
         logger.exception(
-            "\n{}\t{}\tDestination db error".format(
-                title_data[0], title_data[1]
-            )
+            f"\n{title_data[0]}\t{title_data[1]}\tDestination db error"
         )
         with titles_errored.get_lock():
             titles_errored.value += 1
@@ -347,9 +338,7 @@ def populate_contents_for_volume(volume):
         contents = get_contents(title_id, ttype, source_cur)
     except:
         logger.exception(
-            "\n{}\tSource db error in populate_contents_for_volume".format(
-                title_id
-            )
+            f"\n{title_id}\tSource db error in populate_contents_for_volume"
         )
         return
     finally:
@@ -362,8 +351,8 @@ def populate_contents_for_volume(volume):
                 with dest_conn.cursor() as dest_cur:
                     dest_cur.execute(
                         """
-                        INSERT INTO contents 
-                        (book_title_id, content_title_id) 
+                        INSERT INTO contents
+                        (book_title_id, content_title_id)
                         VALUES (%s, %s);
                         """,
                         (title_id, content),
@@ -375,9 +364,8 @@ def populate_contents_for_volume(volume):
 
         except:
             logger.exception(
-                "\n{}\tDestination db error in populate_contents_for_volume".format(
-                    title_id
-                )
+                f"\n{title_id}\tDestination db error in "
+                "populate_contents_for_volume"
             )
         finally:
             dest_conn.close()
@@ -401,18 +389,15 @@ def create_isbn_10_and_13(isbn_tuple):
             else:
                 new_isbn = isbn13_to_10(isbn)
                 if len(new_isbn) != 10:
-                    raise Exception(
-                        "Invalid ISBN conversion for: {}".format(isbn)
-                    )
+                    raise Exception(f"Invalid ISBN conversion for: {isbn}")
         elif len(isbn) == 10:
             new_isbn = isbn10_to_13(isbn)
             if len(new_isbn) != 13:
-                raise Exception("Invalid ISBN conversion for: {}".format(isbn))
+                raise Exception(f"Invalid ISBN conversion for: {isbn}")
         else:
             raise Exception(
-                "ISBN for {} has incorrect number of characters: {}".format(
-                    title_id, isbn
-                )
+                f"ISBN for {title_id} has incorrect number of characters: "
+                f"{isbn}"
             )
 
         if new_isbn:
@@ -432,7 +417,7 @@ def create_isbn_10_and_13(isbn_tuple):
         with isbns_processed.get_lock():
             isbns_processed.value += 1
     except:
-        logger.exception("\n{}\tFailed to process".format(isbn_tuple[0]))
+        logger.exception(f"\n{isbn_tuple[0]}\tFailed to process")
         with isbns_errored.get_lock():
             isbns_errored.value += 1
         return
@@ -470,8 +455,8 @@ def deduplicate_isbn(duplicate_isbn):
                 # concurrent processes don't try to work on the same data
                 dest_cur.execute(
                     """
-                    SELECT b.title_id, b.title, b.authors, b.year, b.pages, 
-                        b.alt_titles, b.cover_image, 
+                    SELECT b.title_id, b.title, b.authors, b.year, b.pages,
+                        b.alt_titles, b.cover_image,
                         i.book_type, i.foreign_lang
                     FROM books AS b
                     JOIN isbns AS i
@@ -616,9 +601,7 @@ def deduplicate_isbn(duplicate_isbn):
                             winner_takes_all(isbn_claimants, dest_cur)
 
     except:
-        logger.exception(
-            "\n{}\tFailed to dedulpicate".format(duplicate_isbn[0])
-        )
+        logger.exception(f"\n{duplicate_isbn[0]}\tFailed to dedulpicate")
         with isbns_errored.get_lock():
             isbns_errored.value += 1
         return
@@ -636,11 +619,10 @@ if __name__ == "__main__":
     if cfg.DEBUG:
         logging.basicConfig(level=logging.WARNING)
     else:
-        log_path = "/tmp/" + str(start).split(".")[0] + ".log"
+        log_path = f"/tmp/{str(start).split('.')[0]}.log"
         logging.basicConfig(filename=log_path, level=logging.INFO)
     logger = logging.getLogger(__name__)
-    logger.info("{}\tStarting Logging".format(str(start)))
-
+    logger.info(f"{start}\tStarting Logging")
     # TODO: make this configurable script parameter
     my_lang = cfg.ENGLISH
     source_conn = mysql.connector.connect(**cfg.SOURCE_DB_PARAMS)
@@ -687,10 +669,10 @@ if __name__ == "__main__":
                     )
                     if language_used == "simple":
                         warning_str = (
-                            "The specified language isn't "
-                            + "doesn't have a snowball stemmer. "
-                            + "Using simple configuration instead. "
-                            + "Stemming isn't available for title search vectors"
+                            "The specified language isn't doesn't have a "
+                            "snowball stemmer. Using simple configuration "
+                            "instead. Stemming isn't available for title "
+                            "search vectors"
                         )
                         print(warning_str)
                         logger.warning(warning_str)
@@ -734,12 +716,12 @@ if __name__ == "__main__":
 
     #       MAIN TITLE PROCESSING LOOP
     print("\nMain title loop...")
-    print("Processing {} titles".format(len(titles)))
-    print("Start time: {}".format(datetime.now()))
+    print(f"Processing {len(titles)} titles")
+    print(f"Start time: {datetime.now()}")
     if cfg.PROGRESS_BAR:
         i = Value("i", 0)
         two_percent_increment = ceil(len(titles) / 50)
-        print("\n# = {} titles processed".format(two_percent_increment))
+        print(f"\n# = {two_percent_increment} titles processed")
         print("1%[" + "    ." * 10 + "]100%")
         print("  [", end="", flush=True)
 
@@ -752,15 +734,15 @@ if __name__ == "__main__":
 
     end = datetime.now()
     total_time = end - start
-    print("\nTitles added: {}".format(titles_added.value))
-    print("Titles skipped: {}".format(titles_skipped.value))
-    print("Titles errored: {}".format(titles_errored.value))
-    print("Total time: {}\n".format(total_time))
+    print(f"\nTitles added: {titles_added.value}")
+    print(f"Titles skipped: {titles_skipped.value}")
+    print(f"Titles errored: {titles_errored.value}")
+    print(f"Total time: {total_time}\n")
 
     #       POPULATE CONTENTS TABLE
     start = datetime.now()
     print("Populating contents table...")
-    print("Start time: {}".format(start))
+    print(f"Start time: {start}")
     volumes = get_books_for_contents()
 
     # populate books contents in parallel
@@ -769,7 +751,7 @@ if __name__ == "__main__":
 
     end = datetime.now()
     total_time = end - start
-    print("Total time: {}\n".format(total_time))
+    print(f"Total time: {total_time}\n")
 
     #       INDEX TABLES
     dest_conn = psycopg2.connect(cfg.DEST_DB_CONN_STRING)
@@ -782,13 +764,13 @@ if __name__ == "__main__":
                     populate_search_columns(dest_cur)
                     end = datetime.now()
                     total_time = end - start
-                    print("Total time: {}\n".format(total_time))
+                    print(f"Total time: {total_time}\n")
                 print("Creating Indexes...")
                 index_book_tables(dest_cur)
 
                 print("\nAdding ISBN 10 and 13 entries where they are missing")
                 start = datetime.now()
-                print("Start time: {}".format(start))
+                print(f"Start time: {start}")
                 isbn_tuples = get_all_isbn_tuples(dest_cur)
     except:
         error_str = "Problem indexing or getting ISBNs"
@@ -800,11 +782,11 @@ if __name__ == "__main__":
     #       MAIN ISBN 10 - 13 LOOP
     isbns_processed = Value("i", 0)
     isbns_errored = Value("i", 0)
-    print("Processing {} isbns".format(len(isbn_tuples)))
+    print(f"Processing {len(isbn_tuples)} isbns")
     if cfg.PROGRESS_BAR:
         i = Value("i", 0)
         two_percent_increment = ceil(len(isbn_tuples) / 50)
-        print("\n# = {} isbns processed".format(two_percent_increment))
+        print(f"\n# = {two_percent_increment} isbns processed")
         print("1%[" + "    ." * 10 + "]100%")
         print("  [", end="", flush=True)
 
@@ -817,14 +799,14 @@ if __name__ == "__main__":
 
     end = datetime.now()
     total_time = end - start
-    print("\nisbns processed: {}".format(isbns_processed.value))
-    print("isbns errored: {}".format(isbns_errored.value))
-    print("Total time: {}\n".format(total_time))
+    print(f"\nisbns processed: {isbns_processed.value}")
+    print(f"isbns errored: {isbns_errored.value}")
+    print(f"Total time: {total_time}\n")
 
     #       ISBN DEDUPLICATION
     print("Depulicating ISBNs...")
     start = datetime.now()
-    print("Start time: {}".format(start))
+    print(f"Start time: {start}")
 
     dest_conn = psycopg2.connect(cfg.DEST_DB_CONN_STRING)
     try:
@@ -843,11 +825,11 @@ if __name__ == "__main__":
     isbns_errored = Value("i", 0)
 
     print("\nMain isbn deduplication loop...")
-    print("Processing {} isbns".format(len(duplicate_isbns)))
+    print(f"Processing {len(duplicate_isbns)} isbns")
     if cfg.PROGRESS_BAR:
         i = Value("i", 0)
         two_percent_increment = ceil(len(duplicate_isbns) / 50)
-        print("\n# = {} isbns processed".format(two_percent_increment))
+        print(f"\n# = {two_percent_increment} isbns processed")
         print("1%[" + "    ." * 10 + "]100%")
         print("  [", end="", flush=True)
 
@@ -860,9 +842,9 @@ if __name__ == "__main__":
 
     end = datetime.now()
     total_time = end - start
-    print("\nisbns depulicated: {}".format(isbns_deduped.value))
-    print("isbns errored: {}".format(isbns_errored.value))
-    print("Total time: {}\n".format(total_time))
+    print(f"\nisbns depulicated: {isbns_deduped.value}")
+    print(f"isbns errored: {isbns_errored.value}")
+    print(f"Total time: {total_time}\n")
 
     #      FINAL DATABASE OPERATIONS
     dest_conn = psycopg2.connect(cfg.DEST_DB_CONN_STRING)

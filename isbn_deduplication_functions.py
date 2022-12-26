@@ -14,9 +14,9 @@ def get_all_isbn_tuples(dest_cur):
 def get_duplicate_isbns(dest_cur):
     dest_cur.execute(
         """
-        SELECT isbn 
-        FROM isbns 
-        GROUP BY isbn 
+        SELECT isbn
+        FROM isbns
+        GROUP BY isbn
         HAVING count(*) > 1
         """
     )
@@ -85,7 +85,7 @@ def delete_isbn(isbn, dest_cur):
 
     dest_cur.execute(
         """
-        DELETE 
+        DELETE
         FROM isbns
         WHERE title_id != %s
         AND isbn = %s;
@@ -126,7 +126,7 @@ def winner_takes_all(isbn_claimants, dest_cur):
 
         dest_cur.execute(
             """
-            INSERT INTO contents (book_title_id, content_title_id) 
+            INSERT INTO contents (book_title_id, content_title_id)
             SELECT %s, content_title_id
             FROM contents
             WHERE (
@@ -140,7 +140,7 @@ def winner_takes_all(isbn_claimants, dest_cur):
 
         dest_cur.execute(
             """
-            INSERT INTO contents (book_title_id, content_title_id) 
+            INSERT INTO contents (book_title_id, content_title_id)
             SELECT book_title_id, %s
             FROM contents
             WHERE (
@@ -154,7 +154,7 @@ def winner_takes_all(isbn_claimants, dest_cur):
 
         dest_cur.execute(
             """
-            INSERT INTO isbns (isbn, title_id, book_type) 
+            INSERT INTO isbns (isbn, title_id, book_type)
             SELECT isbn, %s, book_type
             FROM isbns
             WHERE title_id = %s
@@ -174,7 +174,7 @@ def winner_takes_all(isbn_claimants, dest_cur):
 
         dest_cur.execute(
             """
-            INSERT INTO more_images (title_id, image) 
+            INSERT INTO more_images (title_id, image)
             SELECT %s, image
             FROM more_images
             WHERE title_id = %s
@@ -186,7 +186,7 @@ def winner_takes_all(isbn_claimants, dest_cur):
         if claimant_cover_image:
             dest_cur.execute(
                 """
-                INSERT INTO more_images (title_id, image) 
+                INSERT INTO more_images (title_id, image)
                 SELECT %s, %s
                 FROM more_images
                 WHERE title_id = %s
