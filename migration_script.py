@@ -2,6 +2,7 @@
 
 import logging
 import sys
+import subprocess
 from datetime import datetime
 from html import unescape
 from math import ceil
@@ -851,7 +852,7 @@ if __name__ == "__main__":
     dest_conn.autocommit = True
     try:
         dest_cur = dest_conn.cursor()
-        print("Constraining, Vacuuming, an Analyzing database...")
+        print("Constraining, Vacuuming, and Analyzing the database...")
         constrain_vacuum_analyze(dest_cur)
     except:
         error_str = "Problem constraining ISBN table, Vacuuming or Analyzing."
@@ -860,4 +861,21 @@ if __name__ == "__main__":
     finally:
         dest_conn.close()
 
-    logger.info("Migration script completed")
+    logger.info(f"Migration complete. Exporting to /tmp/{cfg.DEST_DB_NAME}...")
+    sp = subprocess.Popen(["rm", "-rf", f"/tmp/{cfg.DEST_DB_NAME}"])
+    sp.wait()
+    pg_dump_cmd = [
+        "pg_dump",
+        f"{cfg.DEST_DB_NAME}",
+        f"--file=/tmp/{cfg.DEST_DB_NAME}",
+        "--format=directory",
+        f"--jobs={pool_size}",
+        f"--port={cfg.DEST_DB_PORT}",
+        f"--username={cfg.DEST_DB_USER}",
+    ]
+    sp = subprocess.Popen(pg_dump_cmd)
+    return_code = sp.wait()
+    if return_code != 0:
+        print(f"There was an error dumping {cfg.DEST_DB_NAME}")
+    else:
+        print("SUCCESS")
