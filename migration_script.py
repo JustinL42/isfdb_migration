@@ -1,46 +1,55 @@
 #!/usr/bin/env python3
 
-from multiprocessing import Pool, cpu_count, Value, get_logger
-from multiprocessing_logging import install_mp_handler
 import logging
-from datetime import datetime
-from math import ceil
 import sys
+from datetime import datetime
 from html import unescape
+from math import ceil
+from multiprocessing import Pool, Value, cpu_count
 
 import mysql.connector
-import pymysql
-from sqlalchemy import create_engine
 import psycopg2
+from sqlalchemy import create_engine
 
-from migration_functions import *
-from isbn_deduplication_functions import *
+import setup_configuration as cfg
 from cold_start import cold_start_ranks
-
-PROGRESS_BAR = True
-N_PROC = -2
-LIMIT = None
-DEBUG = True
-CREATE_SEARCH_INDEXES = True
-# The id number for English in the languages table
-ENGLISH = 17
-
-source_db_params = dict(
-    host="localhost",
-    user="root",
-    password="",
-    database="isfdb"
+from isbn_deduplication_functions import (
+    get_all_isbn_tuples,
+    get_duplicate_isbns,
+    insert_virtual_books,
+    isbn10_to_13,
+    isbn13_to_10,
+    delete_isbn,
+    winner_takes_all,
+    simplify_title,
 )
-
-dest_db_name = "recsysetl"
-dest_db_conn_string = "port=5432 dbname={} user=postgres".format(dest_db_name)
-
-source_db_alchemy_conn_string ='mysql+pymysql://root:@127.0.0.1/isfdb'
+from migration_functions import (
+    setup_custom_stop_words,
+    create_custom_text_search_config,
+    safe_drop_tables,
+    create_ttype_enum,
+    prepare_books_tables,
+    populate_search_columns,
+    index_book_tables,
+    get_language_dict,
+    get_all_titles,
+    get_original_fields,
+    get_pub_fields,
+    get_alternate_titles,
+    get_authors,
+    get_wikipedia_link,
+    get_award_winner,
+    get_synopsis,
+    get_note,
+    get_series_strings,
+    get_contents,
+    constrain_vacuum_analyze,
+)
 
 
 def process_title(title_data):
 
-    if PROGRESS_BAR:
+    if cfg.PROGRESS_BAR:
         with i.get_lock():
             i.value += 1
             if i.value % two_percent_increment == 0:
@@ -59,7 +68,7 @@ def process_title(title_data):
 
     rank = cold_start_ranks.get(title_id, None)
 
-    source_conn = mysql.connector.connect(**source_db_params)
+    source_conn = mysql.connector.connect(**cfg.SOURCE_DB_PARAMS)
     try:
 
         source_cur = source_conn.cursor()
@@ -170,7 +179,7 @@ def process_title(title_data):
         source_conn.close()
 
 
-    dest_conn = psycopg2.connect(dest_db_conn_string)
+    dest_conn = psycopg2.connect(cfg.DEST_DB_CONN_STRING)
     try:
         with dest_conn:
             with dest_conn.cursor() as dest_cur:
@@ -249,7 +258,7 @@ def process_title(title_data):
 
 
 def get_books_for_contents():
-    dest_conn = psycopg2.connect(dest_db_conn_string)
+    dest_conn = psycopg2.connect(cfg.DEST_DB_CONN_STRING)
     try:
         with dest_conn:
             with dest_conn.cursor() as dest_cur:
@@ -269,7 +278,7 @@ def get_books_for_contents():
 
 def populate_contents_for_volume(volume):
     title_id, ttype = volume
-    source_conn = mysql.connector.connect(**source_db_params)
+    source_conn = mysql.connector.connect(**cfg.SOURCE_DB_PARAMS)
     try:
         source_cur = source_conn.cursor()
         contents = get_contents(title_id, ttype, source_cur)
@@ -282,7 +291,7 @@ def populate_contents_for_volume(volume):
         source_conn.close()
 
     for content in contents:
-        dest_conn = psycopg2.connect(dest_db_conn_string)
+        dest_conn = psycopg2.connect(cfg.DEST_DB_CONN_STRING)
         try:
             with dest_conn:
                 with dest_conn.cursor() as dest_cur:
@@ -310,7 +319,7 @@ def create_isbn_10_and_13(isbn_tuple):
     try:
         isbn, title_id, book_type, foreign_lang = isbn_tuple
 
-        if PROGRESS_BAR:
+        if cfg.PROGRESS_BAR:
             with i.get_lock():
                 i.value += 1
                 if i.value % two_percent_increment == 0:
@@ -337,7 +346,7 @@ def create_isbn_10_and_13(isbn_tuple):
             )
 
         if new_isbn:
-            dest_conn = psycopg2.connect(dest_db_conn_string)
+            dest_conn = psycopg2.connect(cfg.DEST_DB_CONN_STRING)
             with dest_conn:
                 with dest_conn.cursor() as dest_cur:
                     dest_cur.execute("""
@@ -364,14 +373,14 @@ def create_isbn_10_and_13(isbn_tuple):
 def deduplicate_isbn(duplicate_isbn):
     logger.info(str(duplicate_isbn))
 
-    if PROGRESS_BAR:
+    if cfg.PROGRESS_BAR:
         with i.get_lock():
             i.value += 1
             if i.value % two_percent_increment == 0:
                 print("#", end='', flush=True)
 
 
-    dest_conn = psycopg2.connect(dest_db_conn_string)
+    dest_conn = psycopg2.connect(cfg.DEST_DB_CONN_STRING)
     try:
         with dest_conn:
             with dest_conn.cursor() as dest_cur:
@@ -515,7 +524,7 @@ def deduplicate_isbn(duplicate_isbn):
 if __name__ == '__main__':
 
     start = datetime.now()
-    if DEBUG:
+    if cfg.DEBUG:
         logging.basicConfig(level=logging.WARNING)
     else:
         log_path = "/tmp/" + str(start).split('.')[0] + ".log"
@@ -525,8 +534,8 @@ if __name__ == '__main__':
 
 
     # TODO: make this configurable script parameter
-    my_lang = ENGLISH
-    source_conn = mysql.connector.connect(**source_db_params)
+    my_lang = cfg.ENGLISH
+    source_conn = mysql.connector.connect(**cfg.SOURCE_DB_PARAMS)
     try:
         source_cur = source_conn.cursor()
         language_dict = get_language_dict(source_cur)
@@ -535,12 +544,12 @@ if __name__ == '__main__':
 
     # Try to delete and the table (with user interaction) 
     # and create them again from scratch
-    dest_conn = psycopg2.connect(dest_db_conn_string)
+    dest_conn = psycopg2.connect(cfg.DEST_DB_CONN_STRING)
     dest_conn.autocommit = True
     try:
         with dest_conn:
             with dest_conn.cursor() as dest_cur:
-                if CREATE_SEARCH_INDEXES:
+                if cfg.CREATE_SEARCH_INDEXES:
                     success = setup_custom_stop_words()
                     if not success:
                         sys.exit(1)
@@ -553,7 +562,7 @@ if __name__ == '__main__':
                 finally:
                     if not success:
                         sys.exit(1)
-                if CREATE_SEARCH_INDEXES: 
+                if cfg.CREATE_SEARCH_INDEXES: 
                     language_used = \
                         create_custom_text_search_config(
                             language_dict[my_lang], dest_cur)
@@ -579,21 +588,21 @@ if __name__ == '__main__':
         dest_conn.close()
 
 
-    source_conn = mysql.connector.connect(**source_db_params)
+    source_conn = mysql.connector.connect(**cfg.SOURCE_DB_PARAMS)
     try:
         source_cur = source_conn.cursor()
         language_dict = get_language_dict(source_cur)
         print("Main ISFDB title table query...")
-        titles = get_all_titles(source_cur, limit=LIMIT)
+        titles = get_all_titles(source_cur, limit=cfg.LIMIT)
     finally:
         source_conn.close()
 
-    alchemyEngine = create_engine(source_db_alchemy_conn_string)
+    alchemyEngine = create_engine(cfg.SOURCE_DB_ALCHEMY_CONN_STRING)
 
-    if N_PROC > 0:
-        pool_size = N_PROC
-    elif N_PROC < -1:
-        pool_size = cpu_count() + N_PROC + 1
+    if cfg.N_PROC > 0:
+        pool_size = cfg.N_PROC
+    elif cfg.N_PROC < -1:
+        pool_size = cpu_count() + cfg.N_PROC + 1
     else:
         pool_size = cpu_count()
 
@@ -606,7 +615,7 @@ if __name__ == '__main__':
     print("\nMain title loop...")
     print("Processing {} titles".format(len(titles)))
     print("Start time: {}".format(datetime.now()))
-    if PROGRESS_BAR:
+    if cfg.PROGRESS_BAR:
         i = Value('i', 0)
         two_percent_increment = ceil(len(titles) / 50)
         print("\n# = {} titles processed".format(two_percent_increment))
@@ -617,7 +626,7 @@ if __name__ == '__main__':
     with Pool(pool_size) as p:
         p.map(process_title, titles)
  
-    if PROGRESS_BAR:
+    if cfg.PROGRESS_BAR:
         print("]")
 
     end = datetime.now()
@@ -644,11 +653,11 @@ if __name__ == '__main__':
 
     
     #       INDEX TABLES
-    dest_conn = psycopg2.connect(dest_db_conn_string)
+    dest_conn = psycopg2.connect(cfg.DEST_DB_CONN_STRING)
     try:
         with dest_conn:
             with dest_conn.cursor() as dest_cur:
-                if CREATE_SEARCH_INDEXES:
+                if cfg.CREATE_SEARCH_INDEXES:
                     start = datetime.now()
                     print("Populating search vector columns...")
                     populate_search_columns(dest_cur)
@@ -675,7 +684,7 @@ if __name__ == '__main__':
     isbns_processed = Value('i', 0)
     isbns_errored = Value('i', 0)
     print("Processing {} isbns".format(len(isbn_tuples)))
-    if PROGRESS_BAR:
+    if cfg.PROGRESS_BAR:
         i = Value('i', 0)
         two_percent_increment = ceil(len(isbn_tuples) / 50)
         print("\n# = {} isbns processed".format(two_percent_increment))
@@ -686,7 +695,7 @@ if __name__ == '__main__':
     with Pool(pool_size) as p:
         p.map(create_isbn_10_and_13, isbn_tuples)
  
-    if PROGRESS_BAR:
+    if cfg.PROGRESS_BAR:
         print("]")
 
     end = datetime.now()
@@ -701,7 +710,7 @@ if __name__ == '__main__':
     start = datetime.now()
     print("Start time: {}".format(start))
 
-    dest_conn = psycopg2.connect(dest_db_conn_string)
+    dest_conn = psycopg2.connect(cfg.DEST_DB_CONN_STRING)
     try:
         with dest_conn:
             with dest_conn.cursor() as dest_cur:
@@ -719,7 +728,7 @@ if __name__ == '__main__':
 
     print("\nMain isbn deduplication loop...")
     print("Processing {} isbns".format(len(duplicate_isbns)))
-    if PROGRESS_BAR:
+    if cfg.PROGRESS_BAR:
         i = Value('i', 0)
         two_percent_increment = ceil(len(duplicate_isbns) / 50)
         print("\n# = {} isbns processed".format(two_percent_increment))
@@ -730,7 +739,7 @@ if __name__ == '__main__':
     with Pool(pool_size) as p:
         p.map(deduplicate_isbn, duplicate_isbns)
  
-    if PROGRESS_BAR:
+    if cfg.PROGRESS_BAR:
         print("]")
 
     end = datetime.now()
@@ -740,7 +749,7 @@ if __name__ == '__main__':
     print("Total time: {}\n".format(total_time))
 
     #      FINAL DATABASE OPERATIONS
-    dest_conn = psycopg2.connect(dest_db_conn_string)
+    dest_conn = psycopg2.connect(cfg.DEST_DB_CONN_STRING)
     dest_conn.autocommit = True
     try:
         dest_cur = dest_conn.cursor()

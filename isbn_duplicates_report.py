@@ -1,7 +1,4 @@
 import psycopg2
-dest_db_name = "rec_system"
-dest_db_conn_string = "dbname={} user=postgres".format(dest_db_name)
-
 
 dest_conn = psycopg2.connect(dest_db_conn_string)
 try:
@@ -50,4 +47,3 @@ except Exception as e:
     raise e
 finally:
     dest_conn.close()
-

@@ -1,18 +1,13 @@
-import pandas as pd
 import os
-import subprocess
-import shutil
-from html import unescape
 import re
+import shutil
+import subprocess
+from html import unescape
 
-# Code from languages table
-# Default is 17 for English
-my_lang = 17
-excluded_authurs = [4853, 2857, 319407]
-# This title_id originally belonged to a title that was deleted in the 
-# isfdb and is a convenient place holder to represent isbns that have 
-# been deleted due to being re-used for completely different books. 
-AMBI_ISBN_VIRTUAL_TITLE_ID = 73
+import pandas as pd
+
+import setup_configuration as cfg
+
 
 def setup_custom_stop_words():
     script_dir = os.path.dirname(os.path.realpath(__file__))
@@ -295,11 +290,11 @@ def get_language_dict(source_cur):
 
 
 # Get all the novels, novellas, collections, and omnibuses 
-# where a my_lang version exists, 
+# where a cfg.MY_LANG version exists, 
 # and which aren't non-genre, graphic novels, or by an excluded author
 def get_all_titles(source_cur, limit=None):
     print("main title table query...")
-    sql = """
+    sql = f"""
         SELECT title_id, title_title, title_synopsis, note_id, series_id, 
             title_seriesnum, YEAR(title_copyright) as year, title_ttype, 
             title_parent, title_rating, title_seriesnum_2, title_jvn
@@ -308,14 +303,14 @@ def get_all_titles(source_cur, limit=None):
             (title_ttype = 'SHORTFICTION' AND title_storylen = 'novella') 
             OR title_ttype IN ('ANTHOLOGY', 'COLLECTION', 'NOVEL', 'OMNIBUS')
         ) 
-        AND title_language = {}
+        AND title_language = {cfg.ENGLISH}
         AND title_non_genre != 'Yes' 
         AND title_graphic != 'Yes'
         AND title_id NOT IN (
             SELECT title_id 
             FROM  canonical_author 
-            WHERE author_id in ({})
-        )""".format(my_lang, ",". join([str(a) for a in excluded_authurs]))
+            WHERE author_id in ({cfg.EXCLUDED_AUTHORS})
+        )"""
 
     if limit:
         sql += "\nLIMIT " + str(limit)
@@ -338,17 +333,17 @@ def get_original_fields(title_id, parent_id, source_cur, language_dict):
     original_title, original_year, original_lang = source_cur.fetchone()
 
 
-    # If the original language is also my_lang, this is just a variant title.
+    # If the original language is also cfg.MY_LANG, this is just a variant title.
     # Process this title when the loop is the parent title instead.
-    if original_lang == my_lang:
+    if original_lang == cfg.MY_LANG:
         return False
 
     original_lang = language_dict[original_lang]
     if original_year == 0 or original_year == 8888:
         original_year = None
 
-    # The title is a translation of a foreign language work into my_lang.
-    # Get all the my_lang translations
+    # The title is a translation of a foreign language work into cfg.MY_LANG.
+    # Get all the cfg.MY_LANG translations
     source_cur.execute("""
         SELECT title_id, title_title as translation_title, 
             YEAR(title_copyright) as translation_year, note_id 
@@ -362,7 +357,7 @@ def get_original_fields(title_id, parent_id, source_cur, language_dict):
         AND title_graphic != 'Yes'
         AND title_parent = %s 
         ORDER BY translation_year DESC, title_id DESC;
-        """, (my_lang, parent_id))
+        """, (cfg.MY_LANG, parent_id))
     preferred_translations = source_cur.fetchall()
 
     # Wait to process this work if we aren't on the most recent translation
@@ -414,8 +409,8 @@ def get_pub_fields(title_id, root_id, ttype, source_alch_conn):
                     (all_pubs.pub_ctype == "COLLECTION") |
                     (all_pubs.pub_ctype == "OMNIBUS") ]
 
-    if all_books[ (all_books.title_language == my_lang) ].shape[0] == 0:
-        # if not available as book in my_lang, don't include this title
+    if all_books[ (all_books.title_language == cfg.MY_LANG) ].shape[0] == 0:
+        # if not available as book in cfg.MY_LANG, don't include this title
         return False
 
     if ttype == "NOVELLA":
@@ -423,7 +418,7 @@ def get_pub_fields(title_id, root_id, ttype, source_alch_conn):
     else:
         all_editions = all_books[( (all_books.pub_ctype == ttype) )]
 
-    en_editions = all_editions[ (all_editions.title_language == my_lang ) ]
+    en_editions = all_editions[ (all_editions.title_language == cfg.MY_LANG ) ]
     editions = en_editions.shape[0]
     if editions:
         stand_alone = True
@@ -465,7 +460,7 @@ def get_pub_fields(title_id, root_id, ttype, source_alch_conn):
     def preferred_pubs(pub_column):
         if pub_column.name == 'title_id':
             # Favor the curent title_id above all else, which is either 
-            #the parent title or the most recent my_lang translation
+            #the parent title or the most recent cfg.MY_LANG translation
             favor_title_id = lambda t_id : 1 if t_id == title_id else 2
             return pub_column.map(favor_title_id)
         elif pub_column.name == 'pub_ptype':
@@ -563,7 +558,7 @@ def get_alternate_titles(title_id, title, source_cur):
     AND title_title != %s
     AND title_title NOT REGEXP 
         'part [[:digit:]]+ of |boxed set|abridged|complete novel'
-    """, (title_id, my_lang, title))
+    """, (title_id, cfg.MY_LANG, title))
     title_set = set([r[0] for r in source_cur.fetchall()]) \
         - set(title) - set([''])
     
@@ -752,7 +747,7 @@ def get_contents(title_id, ttype, source_cur):
             ('NOVEL', 'COLLECTION', 'ANTHOLOGY', 'OMNIBUS')
         )
         AND t2.title_id != %s;
-        """, (title_id, title_id, my_lang, ttype, title_id)
+        """, (title_id, title_id, cfg.MY_LANG, ttype, title_id)
     )
     return source_cur.fetchall()
 

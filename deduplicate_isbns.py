@@ -1,27 +1,11 @@
-#!/usr/bin/env python3
-from multiprocessing import Pool, cpu_count, Value, get_logger
-from multiprocessing_logging import install_mp_handler
 import logging
 from datetime import datetime
 from math import ceil
-import sys
-import mysql.connector
-import pymysql
-from sqlalchemy import create_engine
-import psycopg2
-PROGRESS_BAR = False
-N_PROC = -2
-LIMIT = None
-DEBUG = True
-# The id number for English in the languages table
-my_lang = 17
-dest_db_name = "rec_system"
-dest_db_conn_string = "dbname={} user=postgres".format(dest_db_name)
+from multiprocessing import Pool, Value, cpu_count
 
-# This title_id originally belonged to a title that was deleted in the 
-# isfdb and is a convenient place holder to represent isbns that have 
-# been deleted due to being re-used for completely different books. 
-INCONSISTENT_ISBN_VIRTUAL_TITLE = 73
+import psycopg2
+
+import setup_configuration as cfg
 
 
 def insert_virtual_books(dest_cur):
@@ -35,7 +19,11 @@ def insert_virtual_books(dest_cur):
         (title_id, title, book_type, virtual, note)
         VALUES(%s, 'Ambiguous ISBN', 'NOVEL', True, %s)
         ON CONFLICT DO NOTHING;
-        """, (INCONSISTENT_ISBN_VIRTUAL_TITLE, ambigous_isbn_note))
+        """, (
+            cfg.INCONSISTENT_ISBN_VIRTUAL_TITLE, 
+            ambigous_isbn_note
+        )
+    )
 
 def delete_isbn(isbn, dest_cur):
 
@@ -43,7 +31,7 @@ def delete_isbn(isbn, dest_cur):
         INSERT INTO isbns
         (isbn, title_id, book_type)
         VALUES(%s, %s, 'NOVEL');
-        """, (isbn, INCONSISTENT_ISBN_VIRTUAL_TITLE)
+        """, (isbn, cfg.INCONSISTENT_ISBN_VIRTUAL_TITLE)
     )
 
     dest_cur.execute("""
@@ -51,7 +39,7 @@ def delete_isbn(isbn, dest_cur):
         FROM isbns
         WHERE title_id != %s
         AND isbn = %s;
-        """, (INCONSISTENT_ISBN_VIRTUAL_TITLE, isbn)
+        """, (cfg.INCONSISTENT_ISBN_VIRTUAL_TITLE, isbn)
     )
 
     dest_cur.execute("""
@@ -198,7 +186,7 @@ def simplify_title(title):
 def deduplicate_isbn(duplicate_isbn):
     logger.info(str(duplicate_isbn))
 
-    if PROGRESS_BAR:
+    if cfg.PROGRESS_BAR:
         with i.get_lock():
             i.value += 1
             if i.value % two_percent_increment == 0:
@@ -317,7 +305,7 @@ def deduplicate_isbn(duplicate_isbn):
 if __name__ == '__main__':
 
     start = datetime.now()
-    if DEBUG:
+    if cfg.DEBUG:
         logging.basicConfig(level=logging.WARN)
     else:
         log_path = "/tmp/" + str(start).split('.')[0] + ".log"
@@ -344,6 +332,7 @@ if __name__ == '__main__':
     finally:
         dest_conn.close()
 
+    N_PROC = cfg.N_PROC
     if N_PROC > 0:
         pool_size = N_PROC
     elif N_PROC < -1:
@@ -359,7 +348,7 @@ if __name__ == '__main__':
     print("\nMain isbn deduplication loop...")
     print("Processing {} isbns".format(len(duplicate_isbns)))
     print("Start time: {}".format(datetime.now()))
-    if PROGRESS_BAR:
+    if cfg.PROGRESS_BAR:
         i = Value('i', 0)
         two_percent_increment = ceil(len(duplicate_isbns) / 50)
         print("\n# = {} isbns processed".format(two_percent_increment))
@@ -370,7 +359,7 @@ if __name__ == '__main__':
     with Pool(pool_size) as p:
         p.map(deduplicate_isbn, duplicate_isbns)
  
-    if PROGRESS_BAR:
+    if cfg.PROGRESS_BAR:
         print("]")
 
     end = datetime.now()

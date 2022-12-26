@@ -1,9 +1,5 @@
+import setup_configuration as cfg
 
-
-# This title_id originally belonged to a title that was deleted in the 
-# isfdb and is a convenient place holder to represent isbns that have 
-# been deleted due to being re-used for completely different books. 
-INCONSISTENT_ISBN_VIRTUAL_TITLE = 73
 
 def get_all_isbn_tuples(dest_cur):
     dest_cur.execute("""
@@ -34,7 +30,7 @@ def insert_virtual_books(dest_cur):
         (title_id, title, book_type, virtual, note)
         VALUES(%s, 'Ambiguous ISBN', 'NOVEL', True, %s)
         ON CONFLICT DO NOTHING;
-        """, (INCONSISTENT_ISBN_VIRTUAL_TITLE, ambigous_isbn_note))
+        """, (cfg.INCONSISTENT_ISBN_VIRTUAL_TITLE, ambigous_isbn_note))
 
 
 def isbn10_to_13(isbn10):
@@ -60,7 +56,7 @@ def delete_isbn(isbn, dest_cur):
         INSERT INTO isbns
         (isbn, title_id, book_type)
         VALUES(%s, %s, 'NOVEL');
-        """, (isbn, INCONSISTENT_ISBN_VIRTUAL_TITLE)
+        """, (isbn, cfg.INCONSISTENT_ISBN_VIRTUAL_TITLE)
     )
 
     dest_cur.execute("""
@@ -68,7 +64,7 @@ def delete_isbn(isbn, dest_cur):
         FROM isbns
         WHERE title_id != %s
         AND isbn = %s;
-        """, (INCONSISTENT_ISBN_VIRTUAL_TITLE, isbn)
+        """, (cfg.INCONSISTENT_ISBN_VIRTUAL_TITLE, isbn)
     )
 
     dest_cur.execute("""
