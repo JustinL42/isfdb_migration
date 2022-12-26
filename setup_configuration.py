@@ -19,7 +19,9 @@ CREATE_SEARCH_INDEXES = config.getboolean("create_search_indexes")
 ENGLISH = config.getint("english")
 MY_LANG = ENGLISH
 EXCLUDED_AUTHORS = config["excluded_authors"]
-INCONSISTENT_ISBN_VIRTUAL_TITLE= config.getint("inconsistent_isbn_virtual_title")
+INCONSISTENT_ISBN_VIRTUAL_TITLE = config.getint(
+    "inconsistent_isbn_virtual_title"
+)
 PROGRESS_BAR = config.getboolean("progress_bar")
 if config["limit"] in ["", None]:
     LIMIT = None
@@ -43,7 +45,7 @@ SOURCE_DB_ALCHEMY_CONN_STRING = (
 
 DEST_DB_CONN_STRING = (
     f"dbname={config['dest_db_name']} "
-    f"user={config['dest_db_user']} " 
+    f"user={config['dest_db_user']} "
     f"password={config['dest_db_password']} "
     f"host={config['dest_db_host']} "
     f"port={config['dest_db_port']}"

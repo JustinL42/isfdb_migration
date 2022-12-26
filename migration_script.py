@@ -53,10 +53,22 @@ def process_title(title_data):
         with i.get_lock():
             i.value += 1
             if i.value % two_percent_increment == 0:
-                print("#", end='', flush=True)
+                print("#", end="", flush=True)
 
-    title_id, title, synopsis_id, note_id, series_id, seriesnum, \
-    year, ttype, parent_id, rating, seriesnum_2, title_jvn = title_data
+    (
+        title_id,
+        title,
+        synopsis_id,
+        note_id,
+        series_id,
+        seriesnum,
+        year,
+        ttype,
+        parent_id,
+        rating,
+        seriesnum_2,
+        title_jvn,
+    ) = title_data
 
     if year == 8888:
         # this indicates the title was never published
@@ -73,76 +85,92 @@ def process_title(title_data):
 
         source_cur = source_conn.cursor()
 
-
         #       ORIGINAL DATA
-        # For titles translated into my_lang, get bibliographic data about 
+        # For titles translated into my_lang, get bibliographic data about
         # the original. Get data about existing translations into my_lang.
         if parent_id != 0:
-            # This title may be a translation. 
+            # This title may be a translation.
 
             original_fields = get_original_fields(
-                title_id, parent_id, source_cur, language_dict)
+                title_id, parent_id, source_cur, language_dict
+            )
 
             if not original_fields:
-                # This is either just a variant title of an English 
+                # This is either just a variant title of an English
                 # work, or it is an English translation but not the most
                 # recent. Skip it an wait to process the better title.
-                logger.info("\n{}\t{}\tSkipped: Not preferred title". \
-                    format(title_id, title))
+                logger.info(
+                    "\n{}\t{}\tSkipped: Not preferred title".format(
+                        title_id, title
+                    )
+                )
                 with titles_skipped.get_lock():
                     titles_skipped.value += 1
                 return
-            
+
             root_id = parent_id
-            original_lang, original_title, \
-                original_year, translations, lowest_title_id = original_fields
+            (
+                original_lang,
+                original_title,
+                original_year,
+                translations,
+                lowest_title_id,
+            ) = original_fields
         else:
             root_id = title_id
             original_lang = "English"
             original_title = original_year = None
             translations = []
 
-
         # The only shortfiction being processed are Novellas
         if ttype == "SHORTFICTION":
             ttype = "NOVELLA"
-
 
         #       PUBLICATION DATA
         # Choose representative publications to get a cover, page number, etc.
         # Get all covers and isbns to link to this title in their own tables.
         with alchemyEngine.connect() as source_alch_conn:
             pub_fields = get_pub_fields(
-                title_id, root_id, ttype, source_alch_conn)
+                title_id, root_id, ttype, source_alch_conn
+            )
         source_alch_conn.close()
 
         if not pub_fields:
             # this title isn't available in book form
-            logger.info("\n{}\t{}\tSkipped: Not available as a book" \
-                .format(title_id, title))
+            logger.info(
+                "\n{}\t{}\tSkipped: Not available as a book".format(
+                    title_id, title
+                )
+            )
             with titles_skipped.get_lock():
-                    titles_skipped.value += 1
+                titles_skipped.value += 1
             return
             # return False
 
-        stand_alone, editions, pages, \
-            cover_image, isbn, all_isbns, more_images = pub_fields
-
+        (
+            stand_alone,
+            editions,
+            pages,
+            cover_image,
+            isbn,
+            all_isbns,
+            more_images,
+        ) = pub_fields
 
         #       ETC
         authors = get_authors(title_id, source_cur)
         wikipedia = get_wikipedia_link(title_id, source_cur)
         award_winner = get_award_winner(title_id, source_cur)
 
-
         # Unless this is a translation, check for alternate English titles
-        if (original_lang == language_dict[my_lang]):
+        if original_lang == language_dict[my_lang]:
             alt_titles = get_alternate_titles(title_id, title, source_cur)
         else:
             alt_titles = None
 
         series_str_1, series_str_2 = get_series_strings(
-            series_id, seriesnum, seriesnum_2, parent_id, source_cur)
+            series_id, seriesnum, seriesnum_2, parent_id, source_cur
+        )
 
         if synopsis_id:
             synopsis = get_synopsis(synopsis_id, source_cur)
@@ -154,38 +182,37 @@ def process_title(title_data):
         else:
             note = None
 
-
-        if title_jvn == 'Yes':
+        if title_jvn == "Yes":
             juvenile = True
         else:
             juvenile = False
 
-        # For translated works, use data from the most recent 
-        # translation, but use the lowest title_id of all the 
-        # translations. This improves the stability of the title_id in 
-        # the destination database, since it won't change if a new 
-        # translation is added to the isfdb in the future, but the data 
+        # For translated works, use data from the most recent
+        # translation, but use the lowest title_id of all the
+        # translations. This improves the stability of the title_id in
+        # the destination database, since it won't change if a new
+        # translation is added to the isfdb in the future, but the data
         # will be updated to reflect the newer translation.
-        if original_lang != 'English':
+        if original_lang != "English":
             title_id = lowest_title_id
 
     except:
-        logger.exception("\n{}\t{}\tSource db error".format(
-                    title_data[0], title_data[1]))
+        logger.exception(
+            "\n{}\t{}\tSource db error".format(title_data[0], title_data[1])
+        )
         with titles_errored.get_lock():
             titles_errored.value += 1
         return
     finally:
         source_conn.close()
 
-
     dest_conn = psycopg2.connect(cfg.DEST_DB_CONN_STRING)
     try:
         with dest_conn:
             with dest_conn.cursor() as dest_cur:
 
-
-                dest_cur.execute("""
+                dest_cur.execute(
+                    """
                     INSERT INTO books 
                     (title_id, title, year, authors, book_type, 
                     isbn, pages, editions, alt_titles, 
@@ -201,56 +228,90 @@ def process_title(title_data):
                             %s, %s, %s, 
                             %s, %s, %s, %s, 
                             %s, %s);
-                """, (
-                    title_id, unescape(title), year, authors, ttype, 
-                    isbn, pages, editions, alt_titles, 
-                    series_str_1, series_str_2, 
-                    original_lang, original_title, original_year, 
-                    rating, rank, award_winner, 
-                    juvenile, stand_alone, cover_image, wikipedia, 
-                    synopsis, note)
+                """,
+                    (
+                        title_id,
+                        unescape(title),
+                        year,
+                        authors,
+                        ttype,
+                        isbn,
+                        pages,
+                        editions,
+                        alt_titles,
+                        series_str_1,
+                        series_str_2,
+                        original_lang,
+                        original_title,
+                        original_year,
+                        rating,
+                        rank,
+                        award_winner,
+                        juvenile,
+                        stand_alone,
+                        cover_image,
+                        wikipedia,
+                        synopsis,
+                        note,
+                    ),
                 )
 
-
                 for book_isbn, book_ttype, foreign_lang in all_isbns:
-                    dest_cur.execute("""
+                    dest_cur.execute(
+                        """
                         INSERT INTO isbns 
                         (isbn, title_id, book_type, foreign_lang) 
                         VALUES (%s, %s, %s, %s);
-                        """, (book_isbn, title_id, book_ttype, foreign_lang)
+                        """,
+                        (book_isbn, title_id, book_ttype, foreign_lang),
                     )
 
+                for (
+                    translation_id,
+                    translation_title,
+                    tr_year,
+                    note,
+                ) in translations:
 
-                for translation_id, translation_title, \
-                    tr_year, note in translations:
-
-                    dest_cur.execute("""
+                    dest_cur.execute(
+                        """
                         INSERT INTO translations 
                         (title_id, lowest_title_id, title, year, note) 
                         VALUES (%s, %s, %s, %s, %s);
-                        """, (translation_id, title_id, 
-                            translation_title, tr_year, note) )
-
+                        """,
+                        (
+                            translation_id,
+                            title_id,
+                            translation_title,
+                            tr_year,
+                            note,
+                        ),
+                    )
 
                 for image in more_images:
-                    dest_cur.execute("""
+                    dest_cur.execute(
+                        """
                         INSERT INTO more_images 
                         (title_id, image) 
                         VALUES (%s, %s)
                         ON CONFLICT 
                         ON CONSTRAINT more_images_title_id_image_key 
                         DO NOTHING;
-                    """, (title_id, image)
+                    """,
+                        (title_id, image),
                     )
 
     except:
-        logger.exception("\n{}\t{}\tDestination db error".format(
-                    title_data[0], title_data[1]))
+        logger.exception(
+            "\n{}\t{}\tDestination db error".format(
+                title_data[0], title_data[1]
+            )
+        )
         with titles_errored.get_lock():
             titles_errored.value += 1
         return
     finally:
-            dest_conn.close()
+        dest_conn.close()
 
     with titles_added.get_lock():
         titles_added.value += 1
@@ -262,7 +323,8 @@ def get_books_for_contents():
     try:
         with dest_conn:
             with dest_conn.cursor() as dest_cur:
-                dest_cur.execute("""
+                dest_cur.execute(
+                    """
                     SELECT title_id, book_type
                     FROM books
                     WHERE book_type != 'NOVELLA';
@@ -271,10 +333,11 @@ def get_books_for_contents():
                 volumes = dest_cur.fetchall()
     except:
         logger.exception("Destination db error in get_books_for_contents")
-        return False 
+        return False
     finally:
         dest_conn.close()
     return volumes
+
 
 def populate_contents_for_volume(volume):
     title_id, ttype = volume
@@ -284,8 +347,10 @@ def populate_contents_for_volume(volume):
         contents = get_contents(title_id, ttype, source_cur)
     except:
         logger.exception(
-            "\n{}\tSource db error in populate_contents_for_volume" \
-            .format(title_id))
+            "\n{}\tSource db error in populate_contents_for_volume".format(
+                title_id
+            )
+        )
         return
     finally:
         source_conn.close()
@@ -295,11 +360,13 @@ def populate_contents_for_volume(volume):
         try:
             with dest_conn:
                 with dest_conn.cursor() as dest_cur:
-                    dest_cur.execute("""
+                    dest_cur.execute(
+                        """
                         INSERT INTO contents 
                         (book_title_id, content_title_id) 
                         VALUES (%s, %s);
-                        """, (title_id, content)
+                        """,
+                        (title_id, content),
                     )
         except psycopg2.errors.ForeignKeyViolation:
             # Attempts to insert contents not tracked in the books table
@@ -308,10 +375,12 @@ def populate_contents_for_volume(volume):
 
         except:
             logger.exception(
-                "\n{}\tDestination db error in populate_contents_for_volume" \
-                .format(title_id))
+                "\n{}\tDestination db error in populate_contents_for_volume".format(
+                    title_id
+                )
+            )
         finally:
-                dest_conn.close()
+            dest_conn.close()
     return
 
 
@@ -323,38 +392,42 @@ def create_isbn_10_and_13(isbn_tuple):
             with i.get_lock():
                 i.value += 1
                 if i.value % two_percent_increment == 0:
-                    print("#", end='', flush=True)
+                    print("#", end="", flush=True)
 
         if len(isbn) == 13:
-            if isbn[:3] != '978':
+            if isbn[:3] != "978":
                 # newer isbn 13s don't have an isbn 10 equivilent
                 new_isbn = None
             else:
                 new_isbn = isbn13_to_10(isbn)
                 if len(new_isbn) != 10:
                     raise Exception(
-                        "Invalid ISBN conversion for: {}".format(isbn))
+                        "Invalid ISBN conversion for: {}".format(isbn)
+                    )
         elif len(isbn) == 10:
             new_isbn = isbn10_to_13(isbn)
             if len(new_isbn) != 13:
-                raise Exception(
-                    "Invalid ISBN conversion for: {}".format(isbn))
+                raise Exception("Invalid ISBN conversion for: {}".format(isbn))
         else:
             raise Exception(
-                "ISBN for {} has incorrect number of characters: {}" \
-                .format(title_id, isbn)
+                "ISBN for {} has incorrect number of characters: {}".format(
+                    title_id, isbn
+                )
             )
 
         if new_isbn:
             dest_conn = psycopg2.connect(cfg.DEST_DB_CONN_STRING)
             with dest_conn:
                 with dest_conn.cursor() as dest_cur:
-                    dest_cur.execute("""
+                    dest_cur.execute(
+                        """
                         INSERT INTO isbns
                         (isbn, title_id, book_type, foreign_lang)
                         VALUES(%s, %s, %s, %s)
                         ON CONFLICT DO NOTHING;
-                        """, (new_isbn, title_id, book_type, foreign_lang))
+                        """,
+                        (new_isbn, title_id, book_type, foreign_lang),
+                    )
 
         with isbns_processed.get_lock():
             isbns_processed.value += 1
@@ -377,24 +450,26 @@ def deduplicate_isbn(duplicate_isbn):
         with i.get_lock():
             i.value += 1
             if i.value % two_percent_increment == 0:
-                print("#", end='', flush=True)
-
+                print("#", end="", flush=True)
 
     dest_conn = psycopg2.connect(cfg.DEST_DB_CONN_STRING)
     try:
         with dest_conn:
             with dest_conn.cursor() as dest_cur:
-                dest_cur.execute("""
+                dest_cur.execute(
+                    """
                     SELECT title_id
                     FROM books
                     WHERE isbn = %s
                     FOR UPDATE;
-                    """, duplicate_isbn
+                    """,
+                    duplicate_isbn,
                 )
 
-                # Lock the book and isbn enties in question so that 
+                # Lock the book and isbn enties in question so that
                 # concurrent processes don't try to work on the same data
-                dest_cur.execute("""
+                dest_cur.execute(
+                    """
                     SELECT b.title_id, b.title, b.authors, b.year, b.pages, 
                         b.alt_titles, b.cover_image, 
                         i.book_type, i.foreign_lang
@@ -412,82 +487,115 @@ def deduplicate_isbn(duplicate_isbn):
                         END,
                         b.year DESC, b.pages DESC, b.title_id DESC
                     FOR UPDATE;
-                    """, duplicate_isbn
+                    """,
+                    duplicate_isbn,
                 )
                 isbn_claimants = dest_cur.fetchall()
 
-                #TODO lock contents tables
+                # TODO lock contents tables
 
                 if len(isbn_claimants) == 0:
-                    e_str = str(duplicate_isbn[0]) + ": all records " + \
-                        "for this ISBN were already deleted"
+                    e_str = (
+                        str(duplicate_isbn[0])
+                        + ": all records "
+                        + "for this ISBN were already deleted"
+                    )
                 elif len(isbn_claimants) == 1:
-                    e_str = str(duplicate_isbn[0]) + \
-                        ": all but one record " + \
-                        "for this ISBN were already deleted"
+                    e_str = (
+                        str(duplicate_isbn[0])
+                        + ": all but one record "
+                        + "for this ISBN were already deleted"
+                    )
                 else:
                     e_str = None
 
                 if e_str:
                     raise Exception(e_str)
 
-                # There are two ways to resolve duplicate ISBNs: 
+                # There are two ways to resolve duplicate ISBNs:
                 # delete the ISBN from both titles (most common), or
-                # "winner takes all", which is reserved for cases where 
+                # "winner takes all", which is reserved for cases where
                 # the book is more or less just a new edition with extra
-                # material and the book entries can be merged. The rest 
+                # material and the book entries can be merged. The rest
                 # of the logic in this method tries to determine this.
-                _, a_title, a_authors, _, _, _, _, \
-                    a_book_type, a_foreign_lang = isbn_claimants[0]
+                (
+                    _,
+                    a_title,
+                    a_authors,
+                    _,
+                    _,
+                    _,
+                    _,
+                    a_book_type,
+                    a_foreign_lang,
+                ) = isbn_claimants[0]
 
-                _, b_title, b_authors, _, _, _, _, \
-                    b_book_type, b_foreign_lang = isbn_claimants[1]  
+                (
+                    _,
+                    b_title,
+                    b_authors,
+                    _,
+                    _,
+                    _,
+                    _,
+                    b_book_type,
+                    b_foreign_lang,
+                ) = isbn_claimants[1]
 
                 # The tuple of book types is a key variable in determining
-                # which case this is, since certain changes 
-                # (novel to collection) are typical of extra material 
+                # which case this is, since certain changes
+                # (novel to collection) are typical of extra material
                 # being added to the new edition of a book, while others
                 # (novella to omnibus) aren't possible without making it
                 # a substantially different book.
-                a_b_book_types =   (a_book_type, b_book_type)
+                a_b_book_types = (a_book_type, b_book_type)
 
-                if (len(isbn_claimants) > 2 or 
-                    a_foreign_lang or b_foreign_lang or
-                    a_b_book_types in \
-                        [('NOVELLA', 'OMNIBUS'), ('NOVEL', 'NOVELLA')]):
+                if (
+                    len(isbn_claimants) > 2
+                    or a_foreign_lang
+                    or b_foreign_lang
+                    or a_b_book_types
+                    in [("NOVELLA", "OMNIBUS"), ("NOVEL", "NOVELLA")]
+                ):
                     # Cases of more than two titles sharing an ISBN are
-                    # pactically always multi-volume series that are 
+                    # pactically always multi-volume series that are
                     # sold under a common ISBN, which than is not useful
                     # for identifying the book. It should be deleted.
-                    # Likewise, any case of foreign isbns causing 
-                    # duplication are too likely to cause errors with 
-                    # winner-take-all, and cases of book type 
+                    # Likewise, any case of foreign isbns causing
+                    # duplication are too likely to cause errors with
+                    # winner-take-all, and cases of book type
                     # transformation considered impossible are also deleted
 
                     delete_isbn(duplicate_isbn[0], dest_cur)
 
                 else:
-                    if a_b_book_types in [('NOVEL', 'ANTHOLOGY'), \
-                        ('NOVEL', 'COLLECTION'), ('NOVEL', 'OMNIBUS'), \
-                        ('NOVELLA', 'ANTHOLOGY'), ('NOVELLA', 'COLLECTION')]:
+                    if a_b_book_types in [
+                        ("NOVEL", "ANTHOLOGY"),
+                        ("NOVEL", "COLLECTION"),
+                        ("NOVEL", "OMNIBUS"),
+                        ("NOVELLA", "ANTHOLOGY"),
+                        ("NOVELLA", "COLLECTION"),
+                    ]:
                         # Book transformations that are technically possible
                         # by adding or removing small amount of material
                         # are considered for winner-takes-all only on an
                         # exact title match
 
-                        titles_match = (a_title.lower() == b_title.lower())
+                        titles_match = a_title.lower() == b_title.lower()
 
                     else:
                         # The most likely cases of book transformation,
                         # included those were a and b are the same type,
                         # have a less strict name match requirement. This
-                        # is allow cases like "Ghost Stories", and 
+                        # is allow cases like "Ghost Stories", and
                         # "Ghost Stories: now with two bonus stories".
 
                         a_simple_title = simplify_title(a_title)
                         b_simple_title = simplify_title(b_title)
-                        titles_match = a_simple_title in b_simple_title or \
-                            b_simple_title in a_simple_title
+                        titles_match = (
+                            a_simple_title in b_simple_title
+                            or b_simple_title in a_simple_title
+                        )
 
                     if not titles_match:
                         delete_isbn(duplicate_isbn[0], dest_cur)
@@ -497,41 +605,41 @@ def deduplicate_isbn(duplicate_isbn):
                         # to have some authors in common to account for
                         # cases of stories being added or removed from
                         # some editions.
-                        a_author_set = set(a_authors.lower().split(', '))
-                        b_author_set = set(b_authors.lower().split(', '))
-                        authors_in_common = \
-                            a_author_set.intersection(b_author_set)
+                        a_author_set = set(a_authors.lower().split(", "))
+                        b_author_set = set(b_authors.lower().split(", "))
+                        authors_in_common = a_author_set.intersection(
+                            b_author_set
+                        )
                         if not authors_in_common:
                             delete_isbn(duplicate_isbn[0], dest_cur)
                         else:
                             winner_takes_all(isbn_claimants, dest_cur)
 
     except:
-        logger.exception("\n{}\tFailed to dedulpicate".format(
-                    duplicate_isbn[0]))
+        logger.exception(
+            "\n{}\tFailed to dedulpicate".format(duplicate_isbn[0])
+        )
         with isbns_errored.get_lock():
             isbns_errored.value += 1
         return
     finally:
-            dest_conn.close()
+        dest_conn.close()
 
     with isbns_deduped.get_lock():
         isbns_deduped.value += 1
     return
 
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
 
     start = datetime.now()
     if cfg.DEBUG:
         logging.basicConfig(level=logging.WARNING)
     else:
-        log_path = "/tmp/" + str(start).split('.')[0] + ".log"
+        log_path = "/tmp/" + str(start).split(".")[0] + ".log"
         logging.basicConfig(filename=log_path, level=logging.INFO)
     logger = logging.getLogger(__name__)
     logger.info("{}\tStarting Logging".format(str(start)))
-
 
     # TODO: make this configurable script parameter
     my_lang = cfg.ENGLISH
@@ -542,7 +650,7 @@ if __name__ == '__main__':
     finally:
         source_conn.close()
 
-    # Try to delete and the table (with user interaction) 
+    # Try to delete and the table (with user interaction)
     # and create them again from scratch
     dest_conn = psycopg2.connect(cfg.DEST_DB_CONN_STRING)
     dest_conn.autocommit = True
@@ -554,23 +662,36 @@ if __name__ == '__main__':
                     if not success:
                         sys.exit(1)
                 try:
-                    success = safe_drop_tables(['isbns', 'contents', 
-                        'translations', 'more_images', 'books', 'words', 
-                        'isfdb_title_tsc', 'isfdb_title_dict', 'ttype' ], dest_cur)
+                    success = safe_drop_tables(
+                        [
+                            "isbns",
+                            "contents",
+                            "translations",
+                            "more_images",
+                            "books",
+                            "words",
+                            "isfdb_title_tsc",
+                            "isfdb_title_dict",
+                            "ttype",
+                        ],
+                        dest_cur,
+                    )
                 except psycopg2.errors.DependentObjectsStillExist:
                     pass
                 finally:
                     if not success:
                         sys.exit(1)
-                if cfg.CREATE_SEARCH_INDEXES: 
-                    language_used = \
-                        create_custom_text_search_config(
-                            language_dict[my_lang], dest_cur)
-                    if language_used == 'simple':
-                        warning_str = "The specified language isn't " + \
-                            "doesn't have a snowball stemmer. " + \
-                            "Using simple configuration instead. " + \
-                            "Stemming isn't available for title search vectors"
+                if cfg.CREATE_SEARCH_INDEXES:
+                    language_used = create_custom_text_search_config(
+                        language_dict[my_lang], dest_cur
+                    )
+                    if language_used == "simple":
+                        warning_str = (
+                            "The specified language isn't "
+                            + "doesn't have a snowball stemmer. "
+                            + "Using simple configuration instead. "
+                            + "Stemming isn't available for title search vectors"
+                        )
                         print(warning_str)
                         logger.warning(warning_str)
                 try:
@@ -579,14 +700,15 @@ if __name__ == '__main__':
                     pass
                 prepare_books_tables(dest_cur)
     except:
-        print("Problem with stop word file, " + \
-            " or with deleting or creating the tables.")
+        print(
+            "Problem with stop word file, "
+            + " or with deleting or creating the tables."
+        )
         print("Exiting migration script.")
         logger.exception("exception")
         sys.exit(1)
     finally:
         dest_conn.close()
-
 
     source_conn = mysql.connector.connect(**cfg.SOURCE_DB_PARAMS)
     try:
@@ -606,36 +728,34 @@ if __name__ == '__main__':
     else:
         pool_size = cpu_count()
 
-    titles_added = Value('i', 0)
-    titles_skipped = Value('i', 0)
-    titles_errored = Value('i', 0)
-
+    titles_added = Value("i", 0)
+    titles_skipped = Value("i", 0)
+    titles_errored = Value("i", 0)
 
     #       MAIN TITLE PROCESSING LOOP
     print("\nMain title loop...")
     print("Processing {} titles".format(len(titles)))
     print("Start time: {}".format(datetime.now()))
     if cfg.PROGRESS_BAR:
-        i = Value('i', 0)
+        i = Value("i", 0)
         two_percent_increment = ceil(len(titles) / 50)
         print("\n# = {} titles processed".format(two_percent_increment))
-        print("1%[" + "    ."*10 + "]100%")
-        print("  [", end='', flush=True)
+        print("1%[" + "    ." * 10 + "]100%")
+        print("  [", end="", flush=True)
 
     # Process titles in parallel
     with Pool(pool_size) as p:
         p.map(process_title, titles)
- 
+
     if cfg.PROGRESS_BAR:
         print("]")
 
     end = datetime.now()
-    total_time = (end - start)
+    total_time = end - start
     print("\nTitles added: {}".format(titles_added.value))
     print("Titles skipped: {}".format(titles_skipped.value))
     print("Titles errored: {}".format(titles_errored.value))
     print("Total time: {}\n".format(total_time))
-
 
     #       POPULATE CONTENTS TABLE
     start = datetime.now()
@@ -648,10 +768,9 @@ if __name__ == '__main__':
         p.map(populate_contents_for_volume, volumes)
 
     end = datetime.now()
-    total_time = (end - start)
+    total_time = end - start
     print("Total time: {}\n".format(total_time))
 
-    
     #       INDEX TABLES
     dest_conn = psycopg2.connect(cfg.DEST_DB_CONN_STRING)
     try:
@@ -662,7 +781,7 @@ if __name__ == '__main__':
                     print("Populating search vector columns...")
                     populate_search_columns(dest_cur)
                     end = datetime.now()
-                    total_time = (end - start)
+                    total_time = end - start
                     print("Total time: {}\n".format(total_time))
                 print("Creating Indexes...")
                 index_book_tables(dest_cur)
@@ -678,34 +797,31 @@ if __name__ == '__main__':
     finally:
         dest_conn.close()
 
-
-
     #       MAIN ISBN 10 - 13 LOOP
-    isbns_processed = Value('i', 0)
-    isbns_errored = Value('i', 0)
+    isbns_processed = Value("i", 0)
+    isbns_errored = Value("i", 0)
     print("Processing {} isbns".format(len(isbn_tuples)))
     if cfg.PROGRESS_BAR:
-        i = Value('i', 0)
+        i = Value("i", 0)
         two_percent_increment = ceil(len(isbn_tuples) / 50)
         print("\n# = {} isbns processed".format(two_percent_increment))
-        print("1%[" + "    ."*10 + "]100%")
-        print("  [", end='', flush=True)
+        print("1%[" + "    ." * 10 + "]100%")
+        print("  [", end="", flush=True)
 
     # Process isbns in parallel
     with Pool(pool_size) as p:
         p.map(create_isbn_10_and_13, isbn_tuples)
- 
+
     if cfg.PROGRESS_BAR:
         print("]")
 
     end = datetime.now()
-    total_time = (end - start)
+    total_time = end - start
     print("\nisbns processed: {}".format(isbns_processed.value))
     print("isbns errored: {}".format(isbns_errored.value))
     print("Total time: {}\n".format(total_time))
 
-
-    #       ISBN DEDUPLICATION 
+    #       ISBN DEDUPLICATION
     print("Depulicating ISBNs...")
     start = datetime.now()
     print("Start time: {}".format(start))
@@ -723,27 +839,27 @@ if __name__ == '__main__':
     finally:
         dest_conn.close()
 
-    isbns_deduped = Value('i', 0)
-    isbns_errored = Value('i', 0)
+    isbns_deduped = Value("i", 0)
+    isbns_errored = Value("i", 0)
 
     print("\nMain isbn deduplication loop...")
     print("Processing {} isbns".format(len(duplicate_isbns)))
     if cfg.PROGRESS_BAR:
-        i = Value('i', 0)
+        i = Value("i", 0)
         two_percent_increment = ceil(len(duplicate_isbns) / 50)
         print("\n# = {} isbns processed".format(two_percent_increment))
-        print("1%[" + "    ."*10 + "]100%")
-        print("  [", end='', flush=True)
+        print("1%[" + "    ." * 10 + "]100%")
+        print("  [", end="", flush=True)
 
     # Process isbns in parallel
     with Pool(pool_size) as p:
         p.map(deduplicate_isbn, duplicate_isbns)
- 
+
     if cfg.PROGRESS_BAR:
         print("]")
 
     end = datetime.now()
-    total_time = (end - start)
+    total_time = end - start
     print("\nisbns depulicated: {}".format(isbns_deduped.value))
     print("isbns errored: {}".format(isbns_errored.value))
     print("Total time: {}\n".format(total_time))
