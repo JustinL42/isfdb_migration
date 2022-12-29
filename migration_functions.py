@@ -338,7 +338,9 @@ def get_all_titles(source_cur, limit=None):
             SELECT title_id
             FROM  canonical_author
             WHERE author_id in ({cfg.EXCLUDED_AUTHORS})
-        )"""
+        )
+        AND title_id NOT IN ({cfg.EXCLUDED_TITLE_IDS});
+        """
 
     if limit:
         sql += "\nLIMIT " + str(limit)

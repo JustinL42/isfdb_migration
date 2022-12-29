@@ -19,11 +19,12 @@ CREATE_SEARCH_INDEXES = config.getboolean("create_search_indexes")
 ENGLISH = config.getint("english")
 MY_LANG = ENGLISH
 EXCLUDED_AUTHORS = config["excluded_authors"]
+EXCLUDED_TITLE_IDS = config["excluded_title_ids"]
 INCONSISTENT_ISBN_VIRTUAL_TITLE = config.getint(
     "inconsistent_isbn_virtual_title"
 )
 PROGRESS_BAR = config.getboolean("progress_bar")
-if config["limit"] in ["", None]:
+if config["limit"] in ["", None, "None"]:
     LIMIT = None
 else:
     LIMIT = config.getint("limit")
