@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "isfdb_migration"
+description = "A script to migrate the ISFD to Postgres"
+version = "2.1.0"
+authors = [
+  {name = "Justin Lavoie"},
+  {email = "justin.lavoie@post.com"}
+]
+readme = "README.md"
+requires-python = ">=3.11"
+
+dependencies = [
+  "gdown==4.6.0",
+  "mysql-connector-python==8.0.31",
+  "pandas==1.5.2",
+  "psycopg2==2.9.5",
+  "PyMySQL==1.0.2",
+  "SQLAlchemy==1.4.44",
+]
+
+[project.optional-dependencies]
+dev = [
+  "black",
+  "flake8",
+  "Flake8-pyproject",
+  "pipreqs",
+  "pylint",
+  "pylint-django",
+]
+
+[tool.setuptools]
+  py-modules = []
+
+[tool.black]
+line-length = 79
+
+[tool.isort]
+profile = "black"
+line_length = 79
+skip = [".git", ".env"]
+
+[tool.flake8]
+extend-ignore = ["E203", "W503"]
+exclude = [".git", ".env"]
+
+[tool.pylint]
+recursive = true
+disable = ["C0103","C0114","C0115","C0116","R0901","R0912","R0914","R0915"]
+ignore = [".env", ".git", "data", ".recsys/static", "recsys/migrations"]
