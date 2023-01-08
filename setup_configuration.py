@@ -44,10 +44,10 @@ SOURCE_DB_ALCHEMY_CONN_STRING = (
     f"{config['source_db_name']}"
 )
 
-DEST_DB_NAME = config['dest_db_name']
-DEST_DB_USER = config['dest_db_user']
-DEST_DB_HOST = config['dest_db_host']
-DEST_DB_PORT = config.getint('dest_db_port')
+DEST_DB_NAME = config["dest_db_name"]
+DEST_DB_USER = config["dest_db_user"]
+DEST_DB_HOST = config["dest_db_host"]
+DEST_DB_PORT = config.getint("dest_db_port")
 
 DEST_DB_CONN_STRING = (
     f"dbname={DEST_DB_NAME} "

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 
 import logging
-import sys
 import subprocess
+import sys
 from datetime import datetime
 from html import unescape
 from math import ceil
@@ -15,36 +15,36 @@ from sqlalchemy import create_engine
 import setup_configuration as cfg
 from cold_start import cold_start_ranks
 from isbn_deduplication_functions import (
+    delete_isbn,
     get_all_isbn_tuples,
     get_duplicate_isbns,
     insert_virtual_books,
     isbn10_to_13,
     isbn13_to_10,
-    delete_isbn,
-    winner_takes_all,
     simplify_title,
+    winner_takes_all,
 )
 from migration_functions import (
-    setup_custom_stop_words,
+    constrain_vacuum_analyze,
     create_custom_text_search_config,
-    safe_drop_tables,
     create_ttype_enum,
-    prepare_books_tables,
-    populate_search_columns,
-    index_book_tables,
-    get_language_dict,
     get_all_titles,
-    get_original_fields,
-    get_pub_fields,
     get_alternate_titles,
     get_authors,
-    get_wikipedia_link,
     get_award_winner,
-    get_synopsis,
-    get_note,
-    get_series_strings,
     get_contents,
-    constrain_vacuum_analyze,
+    get_language_dict,
+    get_note,
+    get_original_fields,
+    get_pub_fields,
+    get_series_strings,
+    get_synopsis,
+    get_wikipedia_link,
+    index_book_tables,
+    populate_search_columns,
+    prepare_books_tables,
+    safe_drop_tables,
+    setup_custom_stop_words,
 )
 
 

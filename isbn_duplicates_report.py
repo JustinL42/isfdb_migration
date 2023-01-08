@@ -2,7 +2,6 @@ import psycopg2
 
 import setup_configuration as cfg
 
-
 dest_conn = psycopg2.connect(cfg.DEST_DB_CONN_STRING)
 try:
     with dest_conn:
