@@ -487,11 +487,8 @@ def deduplicate_isbn(duplicate_isbn):
                         + "for this ISBN were already deleted"
                     )
                 elif len(isbn_claimants) == 1:
-                    e_str = (
-                        str(duplicate_isbn[0])
-                        + ": all but one record "
-                        + "for this ISBN were already deleted"
-                    )
+                    # This title was already deduped
+                    return
                 else:
                     e_str = None
 
