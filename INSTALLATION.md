@@ -1,7 +1,7 @@
 Installation
 ==========================
 
-These instructions have been tested on Fedora 37. Some details will be different on other platforms. In particular, `*-devel` packages may be named like `*-dev` on Debian-based distros.
+These instructions have been tested on Fedora 40. Some details will be different on other platforms. In particular, `*-devel` packages may be named like `*-dev` on Debian-based distros.
 
 1. **Add the MySQL Community repository.** <br>
 The download urls can be found [here](https://dev.mysql.com/downloads/repo/yum/). It can then be installed with commands like:
@@ -12,7 +12,7 @@ The download urls can be found [here](https://dev.mysql.com/downloads/repo/yum/)
 
 2. **Install OS-level requirements.**
    ~~~
-   sudo dnf install -y gcc git libpq-devel python-devel \
+   sudo dnf install -y gcc gcc-c++ git libpq-devel python-devel \
       postgresql-server postgresql-contrib \
       mysql-community-server mysql-community-devel
    ~~~
@@ -22,7 +22,7 @@ The download urls can be found [here](https://dev.mysql.com/downloads/repo/yum/)
 	PostgreSQL 13 (needed for newer text index functions)
 	
 3. **Set up MySQL.** <br>
-   For the Fedora, the specific instructions to do this are [here](https://docs.fedoraproject.org/en-US/quick-docs/installing-mysql-mariadb/).
+   For Fedora, the specific instructions to do this are [here](https://docs.fedoraproject.org/en-US/quick-docs/installing-mysql-mariadb/).
    The minimal steps needed from the above instructions are:
    ~~~
    sudo systemctl start mysqld

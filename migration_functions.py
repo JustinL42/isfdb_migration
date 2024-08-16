@@ -443,7 +443,7 @@ def get_pub_fields(title_id, root_id, ttype, source_alch_conn):
             WHERE t.title_id = %s
             OR t.title_parent = %s;""",
         source_alch_conn,
-        params=[root_id, root_id],
+        params=(root_id, root_id),
     )
 
     all_books = all_pubs[
